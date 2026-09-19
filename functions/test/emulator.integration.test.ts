@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { getFirestore } from 'firebase-admin/firestore';
 import { createMessageHandler, type AuthenticatedRequest } from '../src/index';
 import { cleanupOrphanFinalizedMedia, recoverExpiredClientRequests } from '../src/index';
+import { cleanupStagingObjects } from '../src/scheduler';
 import { emulatorFixture, seedEmulatorFixture } from '../src/fixtures';
 
 describe('Functions emulator integration', () => {
@@ -128,9 +129,20 @@ describe('Functions emulator integration', () => {
     const storage = (await import('firebase-admin/storage')).getStorage().bucket();
     await storage.file('rooms/room-integration/media/orphan-cleanup/original').save(Buffer.from('orphan'), { metadata: { contentType: 'image/png' } });
     await storage.file('rooms/room-integration/media/fixture-text/original').save(Buffer.from('protected'), { metadata: { contentType: 'image/png' } });
-    const removed = await cleanupOrphanFinalizedMedia();
+    const removed = await cleanupOrphanFinalizedMedia(new Date(Date.now() + 86_400_001), 86_400_000);
     expect(removed).toContain('rooms/room-integration/media/orphan-cleanup/original');
     await expect(storage.file('rooms/room-integration/media/orphan-cleanup/original').exists()).resolves.toEqual([false]);
     await expect(storage.file('rooms/room-integration/media/fixture-text/original').exists()).resolves.toEqual([true]);
+  });
+
+  it('cleans expired staging objects but keeps active request objects', async () => {
+    const storage = (await import('firebase-admin/storage')).getStorage().bucket();
+    await storage.file('rooms/room-integration/staging/user-integration/expired-staging/original').save(Buffer.from('old'), { metadata: { contentType: 'image/png' } });
+    await storage.file('rooms/room-integration/staging/user-integration/active-staging/original').save(Buffer.from('active'), { metadata: { contentType: 'image/png' } });
+    const activeId = createHash('sha256').update('room-integration\0active-staging').digest('hex');
+    await getFirestore().doc(`rooms/room-integration/clientRequests/${activeId}`).set({ uid: 'user-integration', roomId: 'room-integration', clientId: 'active-staging', messageId: 'active-staging-message', state: 'processing' });
+    const result = await cleanupStagingObjects(new Date(Date.now() + 86_400_001), 86_400_000);
+    expect(result.deleted).toContain('rooms/room-integration/staging/user-integration/expired-staging/original');
+    await expect(storage.file('rooms/room-integration/staging/user-integration/active-staging/original').exists()).resolves.toEqual([true]);
   });
 });

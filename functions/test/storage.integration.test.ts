@@ -61,8 +61,8 @@ describe('Storage finalize integration', () => {
     })).rejects.toMatchObject({ code: 'invalid-argument' });
   });
 
-  it('accepts only request-scoped validated thumbnail source', async () => {
-    const result = await finalizeMediaMessageHandler({
+  it('rejects client-owned thumbnail input', async () => {
+    await expect(finalizeMediaMessageHandler({
       auth: { uid: 'user-integration' },
       data: {
         roomId: 'room-integration', clientId: 'finalize-client', kind: 'image',
@@ -70,12 +70,7 @@ describe('Storage finalize integration', () => {
         thumbnailStoragePath: 'rooms/room-integration/staging/user-integration/finalize-client/thumbnail',
         thumbnailChecksum: checksum, mimeType: 'image/png', sizeBytes: 5, fileName: 'image.png', checksum,
       },
-    });
-    const [files] = await getStorage().bucket().getFiles({ prefix: `rooms/room-integration/media/${result.messageId}/` });
-    expect(files.map(file => file.name)).toEqual(expect.arrayContaining([
-      `rooms/room-integration/media/${result.messageId}/original`,
-      `rooms/room-integration/media/${result.messageId}/thumbnail`,
-    ]));
+    })).rejects.toMatchObject({ code: 'invalid-argument' });
   });
 
   it.each([
@@ -121,6 +116,15 @@ describe('Storage finalize integration', () => {
       data: { roomId: 'room-integration', clientId: 'finalize-client', kind: 'image',
         storagePath: 'rooms/room-integration/staging/user-integration/finalize-client/original',
         mimeType: 'image/png', sizeBytes: 5, fileName: 'image.png', checksum: `sha256:${'0'.repeat(64)}` },
+    })).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
+
+  it('rejects Storage filename metadata mismatch', async () => {
+    await expect(finalizeMediaMessageHandler({
+      auth: { uid: 'user-integration' },
+      data: { roomId: 'room-integration', clientId: 'finalize-client', kind: 'image',
+        storagePath: 'rooms/room-integration/staging/user-integration/finalize-client/original',
+        mimeType: 'image/png', sizeBytes: 5, fileName: 'different.png', checksum },
     })).rejects.toMatchObject({ code: 'invalid-argument' });
   });
 

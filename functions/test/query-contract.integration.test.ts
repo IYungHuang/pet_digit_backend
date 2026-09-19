@@ -28,4 +28,21 @@ describe('backend query contract', () => {
     const tombstone = await getFirestore().doc('rooms/room-integration/messages/deleted-message').get();
     expect(tombstone.data()?.state).toBe('deleted');
   });
+
+  it('allows sender tombstone but rejects another active member', async () => {
+    await getFirestore().doc('rooms/room-integration/messages/owned-message').set({
+      messageId: 'owned-message', clientId: 'owned-client', roomId: 'room-integration', senderId: 'user-integration',
+      kind: 'text', state: 'normal', text: 'owned', media: null, schemaVersion: 1,
+      createdAt: new Date('2026-09-19T00:00:00.000Z'), updatedAt: new Date('2026-09-19T00:00:00.000Z'),
+    });
+    await expect(writeMessageTombstone({ auth: { uid: 'user-integration' }, data: { roomId: 'room-integration', messageId: 'owned-message' } })).resolves.toMatchObject({ state: 'deleted' });
+    await getFirestore().doc('rooms/room-integration/messages/other-message').set({
+      messageId: 'other-message', clientId: 'other-client', roomId: 'room-integration', senderId: 'other-sender',
+      kind: 'text', state: 'normal', text: 'other', media: null, schemaVersion: 1,
+      createdAt: new Date('2026-09-19T00:00:00.000Z'), updatedAt: new Date('2026-09-19T00:00:00.000Z'),
+    });
+    await expect(writeMessageTombstone({ auth: { uid: 'user-integration' }, data: { roomId: 'room-integration', messageId: 'other-message' } })).rejects.toMatchObject({ code: 'permission-denied' });
+    await getFirestore().doc('rooms/room-integration/members/user-integration').set({ active: false });
+    await expect(writeMessageTombstone({ auth: { uid: 'user-integration' }, data: { roomId: 'room-integration', messageId: 'owned-message' } })).rejects.toMatchObject({ code: 'permission-denied' });
+  });
 });

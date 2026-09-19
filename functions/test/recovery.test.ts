@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanupOrphanFinalizedMedia, compensateCopiedObjects, recoverExpiredClientRequests, type CleanupRequest, type FinalizedMedia } from '../src/cleanup';
+import { cleanupOrphanFinalizedMedia, compensateCopiedObjects, recoverExpiredClientRequests, selectExpiredStagingObjects, type CleanupRequest, type FinalizedMedia, type StagingObject } from '../src/cleanup';
 
 describe('request and media cleanup selection', () => {
   it('recovers only expired non-terminal requests', () => {
@@ -15,11 +15,20 @@ describe('request and media cleanup selection', () => {
 
   it('selects only unreferenced finalized media', () => {
     const media: FinalizedMedia[] = [
-      { path: 'rooms/r/media/orphan/original', messageId: 'orphan' },
-      { path: 'rooms/r/media/active/original', messageId: 'active' },
-      { path: 'rooms/r/media/committed/original', messageId: 'committed' },
+      { path: 'rooms/r/media/orphan/original', messageId: 'orphan', createdAt: '2026-09-18T00:00:00.000Z' },
+      { path: 'rooms/r/media/active/original', messageId: 'active', createdAt: '2026-09-18T00:00:00.000Z' },
+      { path: 'rooms/r/media/committed/original', messageId: 'committed', createdAt: '2026-09-18T00:00:00.000Z' },
     ];
-    expect(cleanupOrphanFinalizedMedia(media, new Set(['active', 'committed'])).map(item => item.messageId)).toEqual(['orphan']);
+    expect(cleanupOrphanFinalizedMedia(media, new Set(['active', 'committed']), new Date('2026-09-19T00:00:00.000Z'), 86_400_000).map(item => item.messageId)).toEqual(['orphan']);
+    expect(cleanupOrphanFinalizedMedia(media, new Set(), new Date('2026-09-18T01:00:00.000Z'), 86_400_000)).toEqual([]);
+  });
+
+  it('selects only expired request-scoped staging objects', () => {
+    const objects: StagingObject[] = [
+      { path: 'rooms/r/staging/u/c/original', roomId: 'r', uid: 'u', clientId: 'c', createdAt: '2026-09-18T00:00:00.000Z' },
+      { path: 'rooms/r/staging/u/active/original', roomId: 'r', uid: 'u', clientId: 'active', createdAt: '2026-09-19T00:00:00.000Z' },
+    ];
+    expect(selectExpiredStagingObjects(objects, new Date('2026-09-19T00:59:00.000Z'), 3_600_000).map(item => item.clientId)).toEqual(['c']);
   });
 
   it('records compensation delete failures for later cleanup', async () => {

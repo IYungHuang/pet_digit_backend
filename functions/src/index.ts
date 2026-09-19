@@ -3,6 +3,7 @@ import { getApp, initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore, Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { HttpsError, onCall, onRequest, type CallableRequest } from 'firebase-functions/v2/https';
+import * as logger from 'firebase-functions/logger';
 import { normalizeCanonicalMessage, type MediaContract, type MessageKind } from './contracts';
 import { compensateCopiedObjects, cleanupOrphanFinalizedMedia as selectOrphanFinalizedMedia, recoverExpiredClientRequests as selectExpiredRequests, type RequestState } from './cleanup';
 
@@ -114,9 +115,6 @@ function replayOrReject(existing: StoredRequest, uid: string, roomId: string, cl
 function validateStagingPath(path: string, roomId: string, uid: string, clientId: string): void {
   if (path !== `rooms/${roomId}/staging/${uid}/${clientId}/original`) fail('invalid-argument', 'Invalid staging storage path');
 }
-function validateThumbnailPath(path: string, roomId: string, uid: string, clientId: string): void {
-  if (path !== `rooms/${roomId}/staging/${uid}/${clientId}/thumbnail`) fail('invalid-argument', 'Invalid thumbnail storage path');
-}
 function validateSha256(value: string): void {
   if (!/^sha256:[0-9a-f]{64}$/.test(value)) fail('invalid-argument', 'Checksum must use sha256:<hex> format');
 }
@@ -126,17 +124,11 @@ function validateMediaInput(data: Record<string, unknown>): Media {
   const fileName = requiredString(data, 'fileName');
   const checksum = requiredString(data, 'checksum');
   validateSha256(checksum);
+  if (data.thumbnailStoragePath !== undefined || data.thumbnailChecksum !== undefined) fail('invalid-argument', 'Client thumbnails are not accepted');
   if (!MIME_TYPES.has(mimeType) || typeof sizeBytes !== 'number' || !Number.isInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > MAX_BYTES) fail('invalid-argument', 'Invalid media metadata');
   if (data.durationMs != null && (typeof data.durationMs !== 'number' || !Number.isInteger(data.durationMs) || data.durationMs < 0)) fail('invalid-argument', 'Invalid durationMs');
-  if (data.thumbnailStoragePath != null && typeof data.thumbnailStoragePath !== 'string') fail('invalid-argument', 'Invalid thumbnailStoragePath');
   const media: Media = { storagePath: requiredString(data, 'storagePath'), mimeType, sizeBytes, fileName, checksum };
   if (data.durationMs != null) media.durationMs = data.durationMs as number;
-  if (data.thumbnailStoragePath != null) {
-    const thumbnailChecksum = requiredString(data, 'thumbnailChecksum');
-    validateSha256(thumbnailChecksum);
-    media.thumbnailStoragePath = data.thumbnailStoragePath as string;
-    media.thumbnailChecksum = thumbnailChecksum;
-  }
   return media;
 }
 
@@ -147,7 +139,7 @@ function validateStoredMetadata(metadata: StorageMetadata, expectedMime: string 
   if (!metadata.contentType || !MIME_TYPES.has(metadata.contentType) || (expectedMime && metadata.contentType !== expectedMime) ||
     metadata.size == null || metadata.size > MAX_BYTES || (expectedSize != null && metadata.size !== expectedSize) ||
     !metadata.sha256 || metadata.sha256 !== expectedChecksum ||
-    (expectedFileName && metadata.metadata?.fileName && metadata.metadata.fileName !== expectedFileName)) {
+    (expectedFileName && metadata.metadata?.fileName !== expectedFileName)) {
     fail('invalid-argument', 'Storage metadata mismatch');
   }
 }
@@ -228,24 +220,13 @@ function firestoreDependencies(): Dependencies {
         try {
           await getStorage().bucket().file(media.storagePath).copy(getStorage().bucket().file(finalPath));
           copiedPaths.push(finalPath);
-          if (media.thumbnailStoragePath) {
-            const finalThumbnail = `rooms/${roomId}/media/${messageRef.id}/thumbnail`;
-            await getStorage().bucket().file(media.thumbnailStoragePath).copy(getStorage().bucket().file(finalThumbnail));
-            copiedPaths.push(finalThumbnail);
-          }
         } catch (error) {
           const compensation = await compensateCopiedObjects(copiedPaths, async path => { await getStorage().bucket().file(path).delete(); });
           await db.doc(requestRef.path).update({ state: 'failed', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null, cleanupPaths: compensation.failedPaths, cleanupRequired: compensation.failedPaths.length > 0 });
           throw error;
         }
         const finalizedMedia: Media = { ...media, storagePath: finalPath };
-        if (media.thumbnailStoragePath) finalizedMedia.thumbnailStoragePath = `rooms/${roomId}/media/${messageRef.id}/thumbnail`;
         if (media.durationMs == null) delete finalizedMedia.durationMs;
-        if (!media.thumbnailStoragePath) {
-          delete finalizedMedia.thumbnailStoragePath;
-          delete finalizedMedia.thumbnailChecksum;
-        }
-        delete finalizedMedia.thumbnailChecksum;
         media = finalizedMedia;
       }
       try {
@@ -259,7 +240,10 @@ function firestoreDependencies(): Dependencies {
         await requestRef.update({ state: 'failed', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null, cleanupPaths: compensation.failedPaths, cleanupRequired: compensation.failedPaths.length > 0 });
         throw error;
       }
-      if (stagingPath) await getStorage().bucket().file(stagingPath).delete().catch(() => undefined);
+      if (stagingPath) {
+        try { await getStorage().bucket().file(stagingPath).delete(); }
+        catch (error) { await requestRef.update({ cleanupRequired: true, cleanupPaths: [stagingPath] }); logger.error({ event: 'staging_delete_failed', path: stagingPath, error }); }
+      }
       return canonicalResponse(await messageRef.get());
     },
   };
@@ -294,11 +278,6 @@ export async function finalizeMediaMessageHandler(request: AuthenticatedRequest,
   if (existing && !requestMatches(existing, uid, roomId, clientId)) fail('permission-denied', 'Idempotency request identity mismatch');
   const metadata = await deps.getMediaMetadata(media.storagePath);
   validateStoredMetadata(metadata, media.mimeType, media.sizeBytes, media.checksum, media.fileName);
-  if (media.thumbnailStoragePath) {
-    validateThumbnailPath(media.thumbnailStoragePath, roomId, uid, clientId);
-    const thumbnail = await deps.getMediaMetadata(media.thumbnailStoragePath);
-    validateStoredMetadata(thumbnail, undefined, undefined, media.thumbnailChecksum ?? '');
-  }
   return deps.commitMessage({ uid, roomId, clientId, kind: expectedKind, media });
 }
 
@@ -312,6 +291,7 @@ export async function writeMessageTombstone(request: AuthenticatedRequest): Prom
   await getFirestore().runTransaction(async transaction => {
     const snapshot = await transaction.get(ref);
     if (!snapshot.exists) fail('invalid-argument', 'Message not found');
+    if (snapshot.data()?.senderId !== uid) fail('permission-denied', 'Only message sender may create tombstone');
     transaction.update(ref, { state: 'deleted', updatedAt: FieldValue.serverTimestamp() });
   });
   return canonicalResponse(await ref.get());
@@ -329,7 +309,7 @@ export async function recoverExpiredClientRequests(now = new Date()): Promise<st
   return candidates.map(document => document.ref.path);
 }
 
-export async function cleanupOrphanFinalizedMedia(): Promise<string[]> {
+export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Number(process.env.FINALIZED_MEDIA_GRACE_MS ?? 86_400_000)): Promise<string[]> {
   const db = getFirestore();
   const bucket = getStorage().bucket();
   const [files] = await bucket.getFiles({ prefix: 'rooms/' });
@@ -343,8 +323,17 @@ export async function cleanupOrphanFinalizedMedia(): Promise<string[]> {
     const requests = await db.collectionGroup('clientRequests').where('messageId', '==', item.messageId).get();
     if (requests.docs.some(request => ['reserved', 'processing', 'committed'].includes(String(request.data().state)))) protectedIds.add(item.messageId);
   }));
-  const orphans = selectOrphanFinalizedMedia(media, protectedIds);
-  await Promise.all(orphans.map(item => bucket.file(item.path).delete()));
+  const mediaWithDates = await Promise.all(media.map(async item => {
+    const [metadata] = await item.file.getMetadata();
+    return { ...item, createdAt: String(metadata.timeCreated ?? new Date().toISOString()) };
+  }));
+  const orphans = selectOrphanFinalizedMedia(mediaWithDates, protectedIds, now, graceMs);
+  const failures: string[] = [];
+  await Promise.all(orphans.map(async item => {
+    try { await bucket.file(item.path).delete(); }
+    catch (error) { failures.push(item.path); logger.error({ event: 'finalized_media_delete_failed', path: item.path, error }); }
+  }));
+  if (failures.length > 0) throw new Error(`Finalized media cleanup failed for ${failures.length} object(s)`);
   return orphans.map(item => item.path);
 }
 
@@ -353,3 +342,4 @@ export const healthCheck = onRequest((_request, response) => { response.status(2
 export const createMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => createMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export const finalizeMediaMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => finalizeMediaMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export const removeMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => writeMessageTombstone({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
+export * from './scheduler';

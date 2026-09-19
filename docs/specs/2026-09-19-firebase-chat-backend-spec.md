@@ -90,7 +90,10 @@ Media 欄位：
 }
 ```
 
-Canonical message 優先保存 `storagePath`，不保存永久公開 download URL。
+v1 client 只能提交 original staging object；thumbnail 欄位由 client 提交時
+拒絕。`thumbnailStoragePath` 僅保留為未來 trusted backend-generated output
+欄位，不能由 client 指定。Canonical message 優先保存 finalized
+`storagePath`，不保存永久公開 download URL。
 目前 50 MiB 限制須在 server 重驗證：`52,428,800` bytes。
 
 ## 4. Send protocol
@@ -294,9 +297,10 @@ Correlation fields：`requestId`、`uid`、`roomId`、`clientId`、`messageId`�
 ### Cost / reliability controls
 
 - listener limit + cursor pagination。
-- Storage staging TTL、orphan cleanup、thumbnail separate path。Local recovery
-  and orphan-selection helpers exist; Scheduler production wiring remains
-  pending deployment checklist。
+- Storage staging TTL、orphan cleanup、backend-owned thumbnail path。Scheduled
+  Functions 已提供 request recovery、staging TTL cleanup、finalized orphan
+  cleanup；production deployment、Scheduler/alerts 與 App Check registration
+  仍須依 deployment checklist 執行。
 - per-user/room/IP rate limit。
 - Function max instances、budget alerts。
 - Firestore scheduled backup；production 評估 PITR 與 restore drill。

@@ -18,6 +18,6 @@ bounded-query-compatible documents ordered by `createdAt ASC` plus document ID
 indexes. Pagination returns `{ items, nextCursor, hasMore }`; pagination
 results merge into existing state and do not replace the room projection.
 
-Local backend exposes expired-request recovery and finalized-media orphan
-selection/cleanup helpers. Staging objects still require Scheduler production
-wiring and deployment checklist before production deployment.
+Local backend exposes scheduled expired-request recovery, staging TTL cleanup,
+and finalized-media orphan selection/cleanup. Production deployment still
+requires Scheduler wiring review and deployment checklist.

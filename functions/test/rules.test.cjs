@@ -41,6 +41,7 @@ async function main() {
     await memberDb.doc('rooms/room-1/messages/message-1').get();
 
     const storage = env.authenticatedContext('user-1').storage();
+    const inactiveStorage = env.authenticatedContext('user-inactive').storage();
     const anonymousStorage = env.unauthenticatedContext().storage();
     await assert.rejects(
       anonymousStorage.ref('rooms/room-1/staging/user-1/client-1/original').put(Buffer.from('x'), { contentType: 'image/png' }),
@@ -54,11 +55,17 @@ async function main() {
     await assert.rejects(
       storage.ref('rooms/room-1/staging/user-1/client-1/original').put(Buffer.alloc(52_428_801), { contentType: 'image/png' }),
     );
+    await assert.rejects(
+      storage.ref('rooms/room-1/staging/user-1/client-1/thumbnail').put(Buffer.from('x'), { contentType: 'image/png' }),
+    );
+    await assert.rejects(
+      inactiveStorage.ref('rooms/room-1/staging/user-inactive/client-1/original').put(Buffer.from('x'), { contentType: 'image/png' }),
+    );
     await storage.ref('rooms/room-1/staging/user-1/client-1/original').put(Buffer.from('x'), { contentType: 'image/png' });
     await assert.rejects(storage.ref('rooms/room-1/staging/user-1/client-1/original').put(Buffer.from('overwrite'), { contentType: 'image/png' }));
     await assert.rejects(storage.ref('rooms/room-1/media/message-1/original').put(Buffer.from('x'), { contentType: 'image/png' }));
     await assert.rejects(storage.ref('rooms/room-1/media/message-1/original').delete());
-    console.log('Rules tests passed: auth, membership, canonical writes, Storage owner/MIME/size/delete checks');
+    console.log('Rules tests passed: auth, active membership, canonical writes, original-only Storage owner/MIME/size/delete checks');
   } finally {
     await env.cleanup();
   }

@@ -37,10 +37,13 @@ secrets, project IDs, or service-account JSON to this repository.
 - `healthCheck`: emulator-safe HTTP health endpoint.
 - `createMessage`: Auth, room membership, text contract, and
   `uid/roomId/clientId` idempotency.
-- `finalizeMediaMessage`: Auth, membership, staging path, MIME, size, and
-  Storage metadata/checksum validation; server copy to immutable
-  `rooms/{roomId}/media/{messageId}/...` before canonical message creation.
-- `removeMessage`: authenticated active-member tombstone writer.
+- `finalizeMediaMessage`: Auth, membership, staging path, MIME, size, filename,
+  and backend-computed SHA-256 validation; server copy to immutable
+  `rooms/{roomId}/media/{messageId}/original` before canonical message creation.
+  Client thumbnails are rejected; future thumbnail/transcoding output is
+  backend-owned only.
+- `removeMessage`: sender-only tombstone writer. Active membership alone does
+  not grant delete permission; no admin-delete role exists in current schema.
 
 Client code cannot write `rooms/{roomId}/messages/{messageId}` directly.
 Functions are the canonical message writer.
@@ -91,8 +94,24 @@ production.
 Request recovery states are `reserved → processing → committed|failed`, with
 `expired` used by `recoverExpiredClientRequests`. Leases include
 `createdAt/updatedAt/leaseUntil`; active processing returns retryable
-`failed-precondition`. `cleanupOrphanFinalizedMedia` protects committed and
-active request media. Scheduler production wiring remains pending.
+`failed-precondition`. Scheduled recovery runs every 5 minutes by default.
+Staging cleanup and finalized-media orphan cleanup run hourly by default.
+Defaults: request lease 60s, staging TTL 24h, finalized-media grace period
+24h. Override with `REQUEST_RECOVERY_SCHEDULE`, `STAGING_CLEANUP_SCHEDULE`,
+`FINALIZED_MEDIA_CLEANUP_SCHEDULE`, `REQUEST_LEASE_MS`, `STAGING_TTL_MS`, and
+`FINALIZED_MEDIA_GRACE_MS`. Schedules are exported in emulator and are not
+disabled in staging/production; production wiring requires Pub/Sub/Scheduler
+deployment and log alert review.
+
+Cleanup is scoped to exact `rooms/{roomId}/staging/{uid}/{clientId}/original`
+paths and stored request identity. Active or committed requests are protected.
+Delete failures emit structured logs and fail the invocation for retry. Final
+media is deleted only when no message/request references it and grace period
+has elapsed. No cleanup silently swallows failures.
+
+Filename is required metadata and must match Storage custom metadata. Checksum
+is required and must be backend-computed `sha256:<64 lowercase hex>`; caller
+claims alone are not trusted.
 
 ## Required reading
 

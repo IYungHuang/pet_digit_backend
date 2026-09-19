@@ -4,7 +4,7 @@
 
 **Goal:** Harden local Firebase Emulator backend against untrusted thumbnail sources, stuck media reservations, weak checksum validation, unsafe App Check bypass, and ambiguous sync ownership.
 
-**Architecture:** Functions own canonical writes and media finalization. Client uploads only original staging objects; optional thumbnails must use the request-scoped staging thumbnail path and validated metadata. Client request documents use a lease-based state machine, with recovery and orphan selection helpers. Flutter owns live Firestore listener/delta merge; backend owns schema, tombstones, bounded query/index contract, and fixtures.
+**Architecture:** Functions own canonical writes and media finalization. Client uploads only original staging objects; thumbnails are backend-owned (Option B). Client request documents use a lease-based state machine, with scheduled recovery and orphan cleanup. Flutter owns live Firestore listener/delta merge; backend owns schema, tombstones, bounded query/index contract, and fixtures.
 
 **Tech Stack:** Firebase Functions 2nd gen, Admin SDK, Firestore, Cloud Storage, Auth/Firestore/Storage emulators, TypeScript, Vitest, Rules Unit Testing.
 
@@ -39,8 +39,7 @@
 - Modify: `functions/src/index.ts`
 - Modify: `functions/test/storage.integration.test.ts`
 
-- [ ] Validate optional thumbnail path exactly as `rooms/{roomId}/staging/{uid}/{clientId}/thumbnail`.
-- [ ] Validate thumbnail existence, allowed MIME, size, and `sha256:<hex>` digest before copy.
+- [x] Reject client thumbnail input; reserve thumbnail generation for trusted backend processing.
 - [ ] Validate original digest with provider metadata or an explicit emulator-only digest adapter; production configuration rejects missing digest.
 - [ ] Keep canonical message limited to verified finalized paths.
 

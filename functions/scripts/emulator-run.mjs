@@ -5,7 +5,7 @@ import path from 'node:path';
 const functionsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoDir = path.resolve(functionsDir, '..');
 const mode = process.argv[2] ?? 'start';
-const emulatorArgs = ['emulators:exec', '--project', 'demo-pet-digit', '--only', 'auth,firestore,storage,functions'];
+const emulatorArgs = ['emulators:exec', '--project', 'demo-pet-digit', '--only', 'auth,firestore,storage,pubsub,functions'];
 const env = {
   ...process.env,
   GCLOUD_PROJECT: 'demo-pet-digit',
