@@ -1,0 +1,14 @@
+{
+  "name": "pet-digit-backend-local",
+  "private": true,
+  "scripts": {
+    "emulator": "npm --prefix functions run emulator",
+    "test:rules": "npm --prefix functions run test:rules",
+    "test:integration": "npm --prefix functions run test:integration",
+    "test": "npm --prefix functions run test",
+    "lint": "npm --prefix functions run lint",
+    "typecheck": "npm --prefix functions run typecheck",
+    "build": "npm --prefix functions run build",
+    "verify": "npm --prefix functions run verify"
+  }
+}

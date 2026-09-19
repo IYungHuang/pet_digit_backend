@@ -25,7 +25,7 @@ cd functions
 npm install
 npm run build
 cd ..
-firebase emulators:start --project demo-pet-digit
+npm run emulator
 ```
 
 Ports: Auth `9099`, Firestore `8080`, Storage `9199`, Functions `5001`, UI
@@ -45,19 +45,28 @@ Functions are the canonical message writer.
 
 ## Tests
 
-With emulators running in another terminal:
+From repository root:
 
 ```bash
-cd functions
-npm test
+npm install --prefix functions
+npm run emulator
 npm run test:rules
-npm run typecheck
-npm run build
+npm run test:integration
+npm run verify
 ```
 
-Rules tests and integration tests connect only to local emulators. No Redis,
-CDN, transcoding, Flutter Firebase SDK, or production Firebase connection is
-part of this scaffold.
+`npm run verify` runs lint, typecheck, build, unit tests, Rules tests,
+integration tests, and `git diff --check` in that order. Rules/integration
+commands own their temporary emulator lifecycle. Emulator UI: `http://127.0.0.1:4000`.
+
+Rules tests and integration tests connect only to local emulators. Seed fixtures
+contain users, room, member, text, image metadata, and video metadata; fixture
+reset is limited to the emulator room. Orphan upload cleanup remains a future
+TTL job and is documented in `docs/contracts/message-delta-v1.md`.
+
+No Redis, CDN, transcoding, FCM, Flutter Firebase SDK, or production Firebase
+connection is part of this scaffold. Deployment remains unavailable until a
+real Firebase project ID, credentials, and separate deployment review exist.
 
 ## Required reading
 

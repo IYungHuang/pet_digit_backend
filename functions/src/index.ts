@@ -40,6 +40,11 @@ function requiredString(data: Record<string, unknown>, key: string): string {
   return value;
 }
 
+function rejectClientOwnedFields(data: Record<string, unknown>): void {
+  const serverOwned = ['senderId', 'messageId', 'state', 'createdAt', 'updatedAt'];
+  if (serverOwned.some(field => field in data) || (data.message !== undefined)) fail('invalid-argument', 'Server-owned message fields are not accepted');
+}
+
 async function authorizeMember(uid: string, roomId: string, deps: Dependencies): Promise<void> {
   if (!(await deps.isMember(uid, roomId))) fail('permission-denied', 'Room membership required');
 }
@@ -79,6 +84,7 @@ function firestoreDependencies(): Dependencies {
 
 export async function createMessageHandler(request: AuthenticatedRequest, deps: Dependencies = firestoreDependencies()) {
   const uid = requireAuth(request);
+  rejectClientOwnedFields(request.data);
   const roomId = requiredString(request.data, 'roomId');
   const clientId = requiredString(request.data, 'clientId');
   const kind = request.data.kind;

@@ -3,12 +3,12 @@ service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
     function validMime() {
-      return request.resource.contentType in [
+      return request.resource != null && request.resource.contentType in [
         'image/jpeg', 'image/png', 'image/gif', 'image/webp',
         'video/mp4', 'video/quicktime'
       ];
     }
-    function validSize() { return request.resource.size <= 52428800; }
+    function validSize() { return request.resource != null && request.resource.size <= 52428800; }
     match /rooms/{roomId}/media/{uid}/{clientId}/original {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if signedIn() && request.auth.uid == uid &&

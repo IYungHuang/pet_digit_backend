@@ -53,4 +53,20 @@ describe('message contracts', () => {
       },
     }, deps)).rejects.toMatchObject({ code: 'invalid-argument' });
   });
+
+  it('rejects client-owned canonical fields', async () => {
+    await expect(createMessageHandler({
+      auth: { uid: 'user-1' },
+      data: {
+        roomId: 'room-1',
+        clientId: 'client-owned-fields',
+        kind: 'text',
+        text: 'hello',
+        senderId: 'forged-sender',
+        state: 'deleted',
+        createdAt: 'forged-created-at',
+        updatedAt: 'forged-updated-at',
+      },
+    }, deps)).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
 });

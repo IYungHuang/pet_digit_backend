@@ -20,6 +20,10 @@ async function main() {
     });
 
     const memberDb = env.authenticatedContext('user-1').firestore();
+    const anonymousDb = env.unauthenticatedContext().firestore();
+    const nonMemberDb = env.authenticatedContext('user-2').firestore();
+    await assert.rejects(anonymousDb.doc('rooms/room-1/messages/message-1').get());
+    await assert.rejects(nonMemberDb.doc('rooms/room-1/messages/message-1').get());
     await assert.rejects(
       memberDb.doc('rooms/room-1/messages/message-1').set({ text: 'client forged' }),
     );
@@ -30,16 +34,25 @@ async function main() {
     await memberDb.doc('rooms/room-1/messages/message-1').get();
 
     const storage = env.authenticatedContext('user-1').storage();
+    const anonymousStorage = env.unauthenticatedContext().storage();
+    await assert.rejects(
+      anonymousStorage.ref('rooms/room-1/media/user-1/client-1/original').put(Buffer.from('x'), { contentType: 'image/png' }),
+    );
     await assert.rejects(
       storage.ref('rooms/room-1/media/other-user/client-1/original').put(Buffer.from('x'), { contentType: 'image/png' }),
     );
     await assert.rejects(
+      storage.ref('rooms/room-1/media/user-1/client-1/original').put(Buffer.from('x'), { contentType: 'application/octet-stream' }),
+    );
+    await assert.rejects(
       storage.ref('rooms/room-1/media/user-1/client-1/original').put(Buffer.alloc(52_428_801), { contentType: 'image/png' }),
     );
-    console.log('Rules tests passed: Firestore canonical write denial, member read, Storage owner and size checks');
+    await storage.ref('rooms/room-1/media/user-1/client-1/original').put(Buffer.from('x'), { contentType: 'image/png' });
+    await assert.rejects(storage.ref('rooms/room-1/media/user-1/client-1/original').delete());
+    console.log('Rules tests passed: auth, membership, canonical writes, Storage owner/MIME/size/delete checks');
   } finally {
     await env.cleanup();
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().then(() => process.exit(0)).catch(error => { console.error(error); process.exitCode = 1; });
