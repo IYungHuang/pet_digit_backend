@@ -123,7 +123,8 @@ describe('Functions emulator integration', () => {
     const requestRef = getFirestore().doc('rooms/room-integration/clientRequests/cleanup-request');
     await requestRef.set({ uid: 'user-integration', roomId: 'room-integration', clientId: 'cleanup-client', messageId: 'cleanup-message', state: 'reserved', leaseUntil: new Date('2026-09-18T00:00:00.000Z') });
     const recovered = await recoverExpiredClientRequests(new Date('2026-09-19T00:00:00.000Z'));
-    expect(recovered).toContain(requestRef.path);
+    expect(recovered.paths).toContain(requestRef.path);
+    expect(recovered.nextCursor).toBeNull();
     expect((await requestRef.get()).data()?.state).toBe('expired');
 
     const storage = (await import('firebase-admin/storage')).getStorage().bucket();
@@ -133,6 +134,29 @@ describe('Functions emulator integration', () => {
     expect(removed).toContain('rooms/room-integration/media/orphan-cleanup/original');
     await expect(storage.file('rooms/room-integration/media/orphan-cleanup/original').exists()).resolves.toEqual([false]);
     await expect(storage.file('rooms/room-integration/media/fixture-text/original').exists()).resolves.toEqual([true]);
+  });
+
+  it('recovers bounded request pages with cursor and preserves committed state', async () => {
+    const db = getFirestore();
+    const batch = db.batch();
+    for (let index = 0; index < 101; index += 1) {
+      const clientId = `batch-${String(index).padStart(3, '0')}`;
+      const requestId = createHash('sha256').update(`room-integration\0${clientId}`).digest('hex');
+      batch.set(db.doc(`rooms/room-integration/clientRequests/${requestId}`), {
+        uid: 'user-integration', roomId: 'room-integration', clientId, messageId: `batch-message-${index}`,
+        state: 'reserved', leaseUntil: new Date('2026-09-18T00:00:00.000Z'),
+      });
+    }
+    const committedRef = db.doc('rooms/room-integration/clientRequests/committed-batch');
+    batch.set(committedRef, { uid: 'user-integration', roomId: 'room-integration', clientId: 'committed-batch', messageId: 'committed-message', state: 'committed', leaseUntil: new Date('2026-09-18T00:00:00.000Z') });
+    await batch.commit();
+    const first = await recoverExpiredClientRequests(new Date('2026-09-19T00:00:00.000Z'));
+    expect(first.paths).toHaveLength(100);
+    expect(first.nextCursor).toBeTruthy();
+    const second = await recoverExpiredClientRequests(new Date('2026-09-19T00:00:00.000Z'), first.nextCursor ?? undefined);
+    expect(second.paths).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect((await committedRef.get()).data()?.state).toBe('committed');
   });
 
   it('cleans expired staging objects but keeps active request objects', async () => {

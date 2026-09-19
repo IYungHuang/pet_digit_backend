@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { getApp, initializeApp } from 'firebase-admin/app';
-import { FieldValue, getFirestore, Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, getFirestore, Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { HttpsError, onCall, onRequest, type CallableRequest } from 'firebase-functions/v2/https';
 import * as logger from 'firebase-functions/logger';
 import { normalizeCanonicalMessage, type MediaContract, type MessageKind } from './contracts';
-import { compensateCopiedObjects, cleanupOrphanFinalizedMedia as selectOrphanFinalizedMedia, recoverExpiredClientRequests as selectExpiredRequests, type RequestState } from './cleanup';
+import { compensateCopiedObjects, cleanupOrphanFinalizedMedia as selectOrphanFinalizedMedia, recoverExpiredClientRequests as selectExpiredRequests, runWithConcurrency, type RequestState } from './cleanup';
+import { streamSha256 } from './media-stream';
 
 try { getApp(); } catch { initializeApp(); }
 
@@ -62,6 +63,11 @@ export type Dependencies = {
 
 export const MAX_BYTES = 52_428_800;
 export const MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/quicktime']);
+export const REPLAY_WAIT_INTERVAL_MS = 50;
+export const REPLAY_WAIT_TIMEOUT_MS = 750;
+export const RECOVERY_BATCH_SIZE = 100;
+export const FINALIZED_MEDIA_BATCH_SIZE = 100;
+export const CLEANUP_CONCURRENCY = 8;
 type ErrorCode = 'invalid-argument' | 'unauthenticated' | 'permission-denied' | 'failed-precondition';
 
 export function appCheckEnforcementFor(environment: NodeJS.ProcessEnv = process.env): boolean {
@@ -162,11 +168,10 @@ function firestoreDependencies(): Dependencies {
     getMediaMetadata: async storagePath => {
       const object = getStorage().bucket().file(storagePath);
       const [file] = await object.getMetadata();
-      const [contents] = await object.download();
       return {
         contentType: file.contentType,
         size: Number(file.size),
-        sha256: `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+        sha256: await streamSha256(object.createReadStream()),
         md5Hash: file.md5Hash,
         metadata: file.metadata as Record<string, string | undefined> | undefined,
       };
@@ -176,42 +181,41 @@ function firestoreDependencies(): Dependencies {
       let messageRef = db.collection(`rooms/${roomId}/messages`).doc();
       let existing: StoredRequest | null = null;
       let claim: 'new' | 'claimed' | 'active' | 'committed' | undefined;
-      const now = Date.now();
-      const leaseUntil = new Date(now + 60_000);
-      await db.runTransaction(async transaction => {
-        const snapshot = await transaction.get(requestRef);
-        existing = snapshot.exists ? snapshot.data() as StoredRequest : null;
-        if (!existing) {
-          transaction.create(requestRef, { uid, roomId, clientId, messageId: messageRef.id, state: 'reserved', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), leaseUntil: Timestamp.fromDate(leaseUntil) });
-          claim = 'new';
-          return;
+      while (true) {
+        const now = Date.now();
+        const leaseUntil = new Date(now + 60_000);
+        await db.runTransaction(async transaction => {
+          const snapshot = await transaction.get(requestRef);
+          existing = snapshot.exists ? snapshot.data() as StoredRequest : null;
+          if (!existing) {
+            transaction.create(requestRef, { uid, roomId, clientId, messageId: messageRef.id, state: 'processing', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), leaseUntil: Timestamp.fromDate(leaseUntil) });
+            claim = 'new';
+            return;
+          }
+          if (!requestMatches(existing, uid, roomId, clientId)) fail('permission-denied', 'Idempotency request identity mismatch');
+          if (existing.state === 'committed') { claim = 'committed'; return; }
+          const activeLease = existing.leaseUntil instanceof Timestamp ? existing.leaseUntil.toMillis() > now : typeof existing.leaseUntil === 'string' && new Date(existing.leaseUntil).getTime() > now;
+          if (activeLease && existing.state !== 'failed' && existing.state !== 'expired') { claim = 'active'; return; }
+          transaction.update(requestRef, { state: 'processing', updatedAt: FieldValue.serverTimestamp(), leaseUntil: Timestamp.fromDate(leaseUntil) });
+          claim = 'claimed';
+        });
+        if (claim !== 'active') break;
+        const resolved = await waitForRequestResolution(requestRef, uid, roomId, clientId);
+        if (resolved?.state === 'committed') {
+          const replay = await readRequest(uid, roomId, clientId);
+          if (replay?.response) return replay.response;
+          fail('failed-precondition', 'Committed request has no canonical message');
         }
-        if (!requestMatches(existing, uid, roomId, clientId)) fail('permission-denied', 'Idempotency request identity mismatch');
-        if (existing.state === 'committed') { claim = 'committed'; return; }
-        const activeLease = existing.leaseUntil instanceof Timestamp ? existing.leaseUntil.toMillis() > now : typeof existing.leaseUntil === 'string' && new Date(existing.leaseUntil).getTime() > now;
-        if (activeLease && existing.state !== 'failed' && existing.state !== 'expired') { claim = 'active'; return; }
-        transaction.update(requestRef, { state: 'processing', updatedAt: FieldValue.serverTimestamp(), leaseUntil: Timestamp.fromDate(leaseUntil) });
-        claim = 'claimed';
-      });
+        if (resolved?.state === 'failed' || resolved?.state === 'expired') continue;
+        fail('failed-precondition', 'Request is already processing');
+      }
       if (claim === 'committed') {
         const replay = await readRequest(uid, roomId, clientId);
         if (replay?.response) return replay.response;
         fail('failed-precondition', 'Committed request has no canonical message');
       }
-      if (claim === 'active') {
-        fail('failed-precondition', 'Request is already processing');
-      }
       const reservedMessageId = (existing as StoredRequest | null)?.messageId;
       if (reservedMessageId) messageRef = db.doc(`rooms/${roomId}/messages/${reservedMessageId}`);
-      if (claim === 'new') {
-        await db.runTransaction(async transaction => {
-          const reservation = await transaction.get(requestRef);
-          if (!reservation.exists) fail('failed-precondition', 'Request reservation disappeared');
-          const value = reservation.data() as StoredRequest;
-          if (!requestMatches(value, uid, roomId, clientId)) fail('permission-denied', 'Idempotency request identity mismatch');
-          transaction.update(requestRef, { state: 'processing', updatedAt: FieldValue.serverTimestamp(), leaseUntil: Timestamp.fromDate(leaseUntil) });
-        });
-      }
       const copiedPaths: string[] = [];
       let stagingPath: string | undefined;
       if (media) {
@@ -247,6 +251,19 @@ function firestoreDependencies(): Dependencies {
       return canonicalResponse(await messageRef.get());
     },
   };
+}
+
+async function waitForRequestResolution(requestRef: FirebaseFirestore.DocumentReference, uid: string, roomId: string, clientId: string): Promise<StoredRequest | null> {
+  const deadline = Date.now() + REPLAY_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const snapshot = await requestRef.get();
+    if (!snapshot.exists) return null;
+    const request = snapshot.data() as StoredRequest;
+    if (!requestMatches(request, uid, roomId, clientId)) fail('permission-denied', 'Idempotency request identity mismatch');
+    if (['committed', 'failed', 'expired'].includes(String(request.state))) return request;
+    await new Promise(resolve => setTimeout(resolve, REPLAY_WAIT_INTERVAL_MS));
+  }
+  return null;
 }
 
 export async function createMessageHandler(request: AuthenticatedRequest, deps: Dependencies = firestoreDependencies()): Promise<MessageResult> {
@@ -297,42 +314,57 @@ export async function writeMessageTombstone(request: AuthenticatedRequest): Prom
   return canonicalResponse(await ref.get());
 }
 
-export async function recoverExpiredClientRequests(now = new Date()): Promise<string[]> {
+export type RecoveryBatch = { paths: string[]; nextCursor: string | null };
+type RecoveryCursor = { leaseUntil: string; path: string };
+export async function recoverExpiredClientRequests(now = new Date(), cursor?: string): Promise<RecoveryBatch> {
   const db = getFirestore();
-  const snapshot = await db.collectionGroup('clientRequests').get();
+  let query = db.collectionGroup('clientRequests')
+    .where('state', 'in', ['reserved', 'processing', 'failed'])
+    .where('leaseUntil', '<=', Timestamp.fromDate(now))
+    .orderBy('leaseUntil', 'asc')
+    .orderBy(FieldPath.documentId(), 'asc')
+    .limit(RECOVERY_BATCH_SIZE);
+  if (cursor) {
+    const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as RecoveryCursor;
+    query = query.startAfter(Timestamp.fromDate(new Date(decoded.leaseUntil)), decoded.path);
+  }
+  const snapshot = await query.get();
   const candidates = snapshot.docs.filter(document => {
     const request = document.data() as StoredRequest;
     const lease = request.leaseUntil instanceof Timestamp ? request.leaseUntil.toDate().toISOString() : typeof request.leaseUntil === 'string' ? request.leaseUntil : undefined;
     return selectExpiredRequests([{ id: document.ref.path, state: request.state ?? 'reserved', leaseUntil: lease }], now).length === 1;
   });
-  await Promise.all(candidates.map(document => document.ref.update({ state: 'expired', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null })));
-  return candidates.map(document => document.ref.path);
+  for (const document of candidates) await document.ref.update({ state: 'expired', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null });
+  const last = snapshot.docs.at(-1);
+  const nextCursor = last && snapshot.size === RECOVERY_BATCH_SIZE
+    ? Buffer.from(JSON.stringify({ leaseUntil: (last.data().leaseUntil as Timestamp).toDate().toISOString(), path: last.ref.path })).toString('base64url')
+    : null;
+  return { paths: candidates.map(document => document.ref.path), nextCursor };
 }
 
 export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Number(process.env.FINALIZED_MEDIA_GRACE_MS ?? 86_400_000)): Promise<string[]> {
   const db = getFirestore();
   const bucket = getStorage().bucket();
-  const [files] = await bucket.getFiles({ prefix: 'rooms/' });
+  const [files, nextQuery] = await bucket.getFiles({ prefix: 'rooms/', maxResults: FINALIZED_MEDIA_BATCH_SIZE });
+  if (nextQuery?.pageToken) logger.info({ event: 'finalized_media_cleanup_continuation', pageToken: nextQuery.pageToken });
   const media = files.flatMap(file => {
     const match = /^rooms\/([^/]+)\/media\/([^/]+)\/(original|thumbnail)$/.exec(file.name);
     return match ? [{ file, path: file.name, messageId: match[2], roomId: match[1] }] : [];
   });
   const protectedIds = new Set<string>();
-  await Promise.all(media.map(async item => {
+  const mediaWithDates = await runWithConcurrency(media, CLEANUP_CONCURRENCY, async item => {
     if ((await db.doc(`rooms/${item.roomId}/messages/${item.messageId}`).get()).exists) protectedIds.add(item.messageId);
     const requests = await db.collectionGroup('clientRequests').where('messageId', '==', item.messageId).get();
     if (requests.docs.some(request => ['reserved', 'processing', 'committed'].includes(String(request.data().state)))) protectedIds.add(item.messageId);
-  }));
-  const mediaWithDates = await Promise.all(media.map(async item => {
     const [metadata] = await item.file.getMetadata();
     return { ...item, createdAt: String(metadata.timeCreated ?? new Date().toISOString()) };
-  }));
+  });
   const orphans = selectOrphanFinalizedMedia(mediaWithDates, protectedIds, now, graceMs);
   const failures: string[] = [];
-  await Promise.all(orphans.map(async item => {
+  await runWithConcurrency(orphans, CLEANUP_CONCURRENCY, async item => {
     try { await bucket.file(item.path).delete(); }
     catch (error) { failures.push(item.path); logger.error({ event: 'finalized_media_delete_failed', path: item.path, error }); }
-  }));
+  });
   if (failures.length > 0) throw new Error(`Finalized media cleanup failed for ${failures.length} object(s)`);
   return orphans.map(item => item.path);
 }
@@ -340,6 +372,6 @@ export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Nu
 const callOptions = { enforceAppCheck: appCheckEnforcementFor() };
 export const healthCheck = onRequest((_request, response) => { response.status(200).json({ ok: true, emulator: Boolean(process.env.FIRESTORE_EMULATOR_HOST) }); });
 export const createMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => createMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
-export const finalizeMediaMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => finalizeMediaMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
+export const finalizeMediaMessage = onCall({ ...callOptions, memory: '512MiB', timeoutSeconds: 120, concurrency: 10 }, (request: CallableRequest<Record<string, unknown>>) => finalizeMediaMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export const removeMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => writeMessageTombstone({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export * from './scheduler';

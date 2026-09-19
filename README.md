@@ -94,7 +94,9 @@ production.
 Request recovery states are `reserved → processing → committed|failed`, with
 `expired` used by `recoverExpiredClientRequests`. Leases include
 `createdAt/updatedAt/leaseUntil`; active processing returns retryable
-`failed-precondition`. Scheduled recovery runs every 5 minutes by default.
+`failed-precondition`. Same-client active replay polls every 50ms for a bounded
+750ms before returning `failed-precondition`. Scheduled recovery runs every 5
+minutes by default, with a 100-document batch and lease/state query cursor.
 Staging cleanup and finalized-media orphan cleanup run hourly by default.
 Defaults: request lease 60s, staging TTL 24h, finalized-media grace period
 24h. Override with `REQUEST_RECOVERY_SCHEDULE`, `STAGING_CLEANUP_SCHEDULE`,
@@ -102,6 +104,14 @@ Defaults: request lease 60s, staging TTL 24h, finalized-media grace period
 `FINALIZED_MEDIA_GRACE_MS`. Schedules are exported in emulator and are not
 disabled in staging/production; production wiring requires Pub/Sub/Scheduler
 deployment and log alert review.
+
+Recovery processes `reserved`, `processing`, and `failed` records whose
+`leaseUntil <= now`; committed records are excluded and never rewritten. Each
+invocation handles at most 100 records and emits an opaque continuation cursor
+for the next scheduler run; the cursor is persisted in
+`maintenance/scheduler-recovery` and advances only after successful batch
+updates. Scheduled invocations use three retries with a
+maximum retry window of one hour; failures remain visible in structured logs.
 
 Cleanup is scoped to exact `rooms/{roomId}/staging/{uid}/{clientId}/original`
 paths and stored request identity. Active or committed requests are protected.
@@ -111,7 +121,13 @@ has elapsed. No cleanup silently swallows failures.
 
 Filename is required metadata and must match Storage custom metadata. Checksum
 is required and must be backend-computed `sha256:<64 lowercase hex>`; caller
-claims alone are not trusted.
+claims alone are not trusted. Checksum uses Storage `createReadStream()` with
+streaming SHA-256; no full media Buffer is allocated. `finalizeMediaMessage`
+uses 512 MiB memory, 120s timeout, and concurrency 10.
+
+Finalized media cleanup lists at most 100 objects per invocation and uses
+concurrency 8 for metadata/reference checks and deletes. It logs continuation
+tokens, isolates individual delete failures, and preserves the 24h grace period.
 
 ## Required reading
 

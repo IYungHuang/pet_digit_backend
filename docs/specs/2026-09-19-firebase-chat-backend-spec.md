@@ -301,6 +301,11 @@ Correlation fields：`requestId`、`uid`、`roomId`、`clientId`、`messageId`�
   Functions 已提供 request recovery、staging TTL cleanup、finalized orphan
   cleanup；production deployment、Scheduler/alerts 與 App Check registration
   仍須依 deployment checklist 執行。
+- Recovery bounded to 100 `reserved|processing|failed` requests per invocation,
+  filtered by `leaseUntil <= now`, ordered with document-ID cursor. Finalized
+  cleanup lists 100 objects per invocation and caps reference/metadata/delete
+  concurrency at 8. Media checksum streams Storage bytes through SHA-256;
+  finalize runtime is 512 MiB / 120 seconds / concurrency 10.
 - per-user/room/IP rate limit。
 - Function max instances、budget alerts。
 - Firestore scheduled backup；production 評估 PITR 與 restore drill。

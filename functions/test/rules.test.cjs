@@ -28,8 +28,10 @@ async function main() {
     const anonymousDb = env.unauthenticatedContext().firestore();
     const nonMemberDb = env.authenticatedContext('user-2').firestore();
     const inactiveDb = env.authenticatedContext('user-inactive').firestore();
+    const missingMemberDb = env.authenticatedContext('missing-member').firestore();
     await assert.rejects(anonymousDb.doc('rooms/room-1/messages/message-1').get());
     await assert.rejects(nonMemberDb.doc('rooms/room-1/messages/message-1').get());
+    await assert.rejects(missingMemberDb.doc('rooms/room-1/messages/message-1').get());
     await assert.rejects(inactiveDb.doc('rooms/room-1/messages/message-1').get());
     await assert.rejects(
       memberDb.doc('rooms/room-1/messages/message-1').set({ text: 'client forged' }),

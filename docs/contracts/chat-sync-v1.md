@@ -147,6 +147,17 @@ staging TTL cleanup hourly (24h TTL), and finalized orphan cleanup hourly (24h
 grace). Active/committed request media and referenced message media are
 protected. Delete failures are structured-log errors and remain retryable.
 
+Same-client concurrent replay waits 50ms between reads, up to 750ms total. A
+committed request returns its canonical message; failed/expired state may be
+reclaimed; active processing beyond timeout returns `failed-precondition`.
+Recovery scheduler queries only `reserved|processing|failed` records with
+`leaseUntil <= now`, orders by lease/document ID, processes 100 per invocation,
+and emits a cursor for continuation. Committed requests are never rewritten.
+The scheduled handler persists that cursor in a maintenance document and only
+advances it after successful updates.
+Scheduled cleanup invocations retry up to three times within one hour after
+failure; delete failures remain observable and retryable.
+
 ## 7. Optional reliability extension
 
 `roomSequence` and durable `messageEvents` are not required for v1 MVP. Add

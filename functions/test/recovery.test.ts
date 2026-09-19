@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanupOrphanFinalizedMedia, compensateCopiedObjects, recoverExpiredClientRequests, selectExpiredStagingObjects, type CleanupRequest, type FinalizedMedia, type StagingObject } from '../src/cleanup';
+import { cleanupOrphanFinalizedMedia, compensateCopiedObjects, recoverExpiredClientRequests, runWithConcurrency, selectExpiredStagingObjects, type CleanupRequest, type FinalizedMedia, type StagingObject } from '../src/cleanup';
 
 describe('request and media cleanup selection', () => {
   it('recovers only expired non-terminal requests', () => {
@@ -36,5 +36,18 @@ describe('request and media cleanup selection', () => {
       if (path === 'stuck') throw new Error('emulator delete failure');
     });
     expect(result.failedPaths).toEqual(['stuck']);
+  });
+
+  it('limits cleanup task concurrency', async () => {
+    let active = 0;
+    let peak = 0;
+    await runWithConcurrency([1, 2, 3, 4, 5], 2, async value => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await Promise.resolve();
+      active -= 1;
+      return value;
+    });
+    expect(peak).toBeLessThanOrEqual(2);
   });
 });

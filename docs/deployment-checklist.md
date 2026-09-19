@@ -12,6 +12,9 @@ reviewed with a real Firebase project.
 - Deploy Pub/Sub-backed `onSchedule` functions and confirm triggers:
   recovery every 5 minutes, staging cleanup hourly, finalized orphan cleanup
   hourly. Review `*_SCHEDULE`, `*_TTL_MS`, and grace-period values.
+- Confirm recovery state filter/index, 100-record cursor continuation, replay
+  wait 750ms, maintenance cursor persistence, and cleanup batch/concurrency
+  limits (100 / 8).
 - Configure structured-log alerts for cleanup failures, compensation failures,
   active lease age, orphan deletion count, and repeated retries.
 - Run staging tests for active/inactive membership, cross-user replay,

@@ -65,3 +65,21 @@ No local-review BLOCK remains. Production deployment checklist still requires a
 real Firebase project, Scheduler/Pub/Sub deployment, App Check registration,
 log alerts, and staging synthetic verification. Media transcoding, CDN, Redis,
 FCM, and thumbnail generation remain explicitly out of scope.
+
+## Round 4 review response
+
+- C-1: active idempotency claims now use 50ms bounded replay polling for 750ms;
+  committed returns canonical response, failed/expired reclaims, timeout fails
+  closed. Reservation and processing claim are one Firestore transaction.
+- H-1: recovery uses state allowlist, `leaseUntil <= now`, composite index,
+  100-record limit, ordered document cursor, sequential updates, and committed
+  protection.
+- H-2: Storage checksum uses `createReadStream()` + `pipeline()` + SHA-256;
+  stream errors propagate. Finalize runtime is 512 MiB, 120s, concurrency 10.
+- M-1: new requests enter processing atomically with reservation identity and
+  lease; separate reserved-to-processing transaction removed.
+- M-2: finalized listing is capped at 100; reference/metadata/delete work uses
+  concurrency 8, per-object failure logging, retryable invocation failure, and
+  grace protection.
+- L-1: Storage Rules now require `firestore.exists()` before reading active
+  membership; missing, inactive, and active member cases are tested.

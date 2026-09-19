@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { selectExpiredStagingObjects, type StagingObject } from './cleanup';
-import { cleanupOrphanFinalizedMedia, recoverExpiredClientRequests } from './index';
+import { cleanupOrphanFinalizedMedia, recoverExpiredClientRequests, RECOVERY_BATCH_SIZE, FINALIZED_MEDIA_BATCH_SIZE } from './index';
 
 const positiveMs = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
@@ -33,11 +33,13 @@ export function schedulerConfigFor(environment: NodeJS.ProcessEnv = process.env)
 }
 
 const config = schedulerConfigFor();
+const retryConfig = { retryCount: 3, maxRetrySeconds: 3_600 };
 
 export async function cleanupStagingObjects(now = new Date(), ttlMs = config.stagingTtlMs): Promise<{ deleted: string[]; failures: string[] }> {
   const db = getFirestore();
   const bucket = getStorage().bucket();
-  const [files] = await bucket.getFiles({ prefix: 'rooms/' });
+  const [files, nextQuery] = await bucket.getFiles({ prefix: 'rooms/', maxResults: FINALIZED_MEDIA_BATCH_SIZE });
+  if (nextQuery?.pageToken) logger.info({ event: 'staging_cleanup_continuation', pageToken: nextQuery.pageToken });
   const objects: StagingObject[] = [];
   for (const file of files) {
     const match = /^rooms\/([^/]+)\/staging\/([^/]+)\/([^/]+)\/original$/.exec(file.name);
@@ -77,17 +79,21 @@ function requireRequestId(roomId: string, clientId: string): string {
   return createHash('sha256').update(`${roomId}\0${clientId}`).digest('hex');
 }
 
-export const recoverExpiredClientRequestsScheduled = onSchedule(config.recoverySchedule, async () => {
-  const paths = await recoverExpiredClientRequests();
-  logger.info({ event: 'client_request_recovery_completed', count: paths.length, environment: process.env.APP_ENV ?? 'production' });
+export const recoverExpiredClientRequestsScheduled = onSchedule({ schedule: config.recoverySchedule, ...retryConfig }, async () => {
+  const stateRef = getFirestore().doc('maintenance/scheduler-recovery');
+  const state = await stateRef.get();
+  const cursor = typeof state.data()?.cursor === 'string' ? state.data()?.cursor as string : undefined;
+  const result = await recoverExpiredClientRequests(new Date(), cursor);
+  await stateRef.set({ cursor: result.nextCursor, updatedAt: new Date(), processed: result.paths.length });
+  logger.info({ event: 'client_request_recovery_completed', count: result.paths.length, nextCursor: result.nextCursor, batchSize: RECOVERY_BATCH_SIZE, environment: process.env.APP_ENV ?? 'production' });
 });
 
-export const cleanupStagingObjectsScheduled = onSchedule(config.stagingSchedule, async () => {
+export const cleanupStagingObjectsScheduled = onSchedule({ schedule: config.stagingSchedule, ...retryConfig }, async () => {
   const result = await cleanupStagingObjects();
   logger.info({ event: 'staging_cleanup_completed', ...result, environment: process.env.APP_ENV ?? 'production' });
 });
 
-export const cleanupOrphanFinalizedMediaScheduled = onSchedule(config.finalizedSchedule, async () => {
+export const cleanupOrphanFinalizedMediaScheduled = onSchedule({ schedule: config.finalizedSchedule, ...retryConfig }, async () => {
   const paths = await cleanupOrphanFinalizedMedia();
-  logger.info({ event: 'finalized_media_cleanup_completed', count: paths.length, environment: process.env.APP_ENV ?? 'production' });
+  logger.info({ event: 'finalized_media_cleanup_completed', count: paths.length, batchSize: FINALIZED_MEDIA_BATCH_SIZE, environment: process.env.APP_ENV ?? 'production' });
 });

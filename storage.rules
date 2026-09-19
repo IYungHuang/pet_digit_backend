@@ -3,7 +3,7 @@ service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
     function activeMember(roomId) {
-      return signedIn() && firestore.get(/databases/(default)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.active == true;
+      return signedIn() && firestore.exists(/databases/(default)/documents/rooms/$(roomId)/members/$(request.auth.uid)) && firestore.get(/databases/(default)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.active == true;
     }
     function validMime() {
       return request.resource != null && request.resource.contentType in [
