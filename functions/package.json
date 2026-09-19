@@ -8,11 +8,11 @@
     "lint": "eslint src test vitest.config.ts --ext .ts,.cjs --report-unused-disable-directives",
     "typecheck": "tsc --noEmit",
     "emulator": "node scripts/emulator-run.mjs start",
-    "test": "vitest run test/contracts.test.ts test/message-contract.test.ts test/fixtures.test.ts test/app-check.test.ts",
+    "test": "vitest run test/contracts.test.ts test/message-contract.test.ts test/fixtures.test.ts test/app-check.test.ts test/recovery.test.ts",
     "test:rules": "node scripts/emulator-run.mjs rules",
     "test:rules:local": "node test/rules.test.cjs",
     "test:integration": "node scripts/emulator-run.mjs integration",
-    "test:integration:local": "vitest run test/emulator.integration.test.ts test/storage.integration.test.ts",
+    "test:integration:local": "vitest run test/emulator.integration.test.ts test/storage.integration.test.ts test/query-contract.integration.test.ts",
     "test:emulator:local": "npm run test:rules:local && npm run test:integration:local",
     "verify": "npm run lint && npm run typecheck && npm run build && npm test && node scripts/emulator-run.mjs verify && git -C .. diff --check",
     "test:watch": "vitest"

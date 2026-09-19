@@ -21,8 +21,34 @@ files, production Firebase connection, deploy, credentials, or secrets changed.
 - App Check: production/default enforcement is true; emulator bypass requires
   explicit emulator host variables.
 
+## Second review closure
+
+- High 1: optional thumbnail source is accepted only at the request-scoped
+  staging path. Backend verifies object existence, allowlisted MIME, size, and
+  backend-computed SHA-256 before copying; finalized message stores only the
+  finalized thumbnail path. Client Rules expose original staging create only;
+  thumbnail objects are backend-generated/test-fixture inputs.
+- High 2: request leases now use `reserved`, `processing`, `committed`,
+  `failed`, and `expired`, with `createdAt`, `updatedAt`, and `leaseUntil`.
+  Expired recovery, failed retry, compensation delete, and orphan selection
+  helpers have emulator/unit coverage.
+- Medium 3: checksum requires `sha256:<64 lowercase hex>` and backend computes
+  digest from Storage bytes. Missing provider/backend digest fails closed.
+- Medium 4: App Check bypass requires explicit emulator mode, bypass mode,
+  demo project, all three loopback emulator hosts, and non-production runtime.
+- Medium 5: sync ownership is explicit: Flutter owns listener/delta/store/cursor
+  merge; backend owns writes, tombstones, schema, Rules, indexes, fixtures,
+  and query contract.
+
+## Audit evidence
+
+Latest retry: `2026-09-19T07:49:25Z` UTC. npm registry DNS remained unavailable
+(`getaddrinfo ENOTFOUND registry.npmjs.org`); prior audit findings remain the
+last valid evidence. No force upgrade and no audit-clear claim.
+
 ## Remaining blocker
 
-Orphan staging cleanup TTL job is not implemented. Media transcoding and
-thumbnail generation remain out of scope; optional thumbnail copy is supported,
-but no thumbnail is synthesized.
+Scheduler production wiring for staging TTL/recovery/orphan cleanup is not
+implemented. Local cleanup selection and execution helpers are emulator-tested.
+Media transcoding and thumbnail generation remain out of scope; optional
+backend-generated thumbnail copy is supported, but no thumbnail is synthesized.

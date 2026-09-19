@@ -12,9 +12,12 @@ Every delta includes `schemaVersion: 1`, `type`, `roomId`, `messageId`,
 `clientId`, and `message`. Message identity and sender fields come from the
 server. Firestore `DocumentChange` is never exposed by this contract.
 
-Live listeners use bounded queries ordered by `createdAt` and merge deltas into
-client state. Pagination returns `{ items, nextCursor, hasMore }`; pagination
+Live listener ownership belongs to Flutter Firebase adapter. Backend supplies
+bounded-query-compatible documents ordered by `createdAt ASC` plus document ID
+`ASC` tie-breaker, with limit 50 (maximum 100), tombstone state, Rules, and
+indexes. Pagination returns `{ items, nextCursor, hasMore }`; pagination
 results merge into existing state and do not replace the room projection.
 
-Orphan Storage uploads remain outside this scaffold's runtime cleanup. Staging
-objects require a future TTL/orphan cleanup job before production deployment.
+Local backend exposes expired-request recovery and finalized-media orphan
+selection/cleanup helpers. Staging objects still require Scheduler production
+wiring and deployment checklist before production deployment.

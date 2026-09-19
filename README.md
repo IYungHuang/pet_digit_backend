@@ -40,6 +40,7 @@ secrets, project IDs, or service-account JSON to this repository.
 - `finalizeMediaMessage`: Auth, membership, staging path, MIME, size, and
   Storage metadata/checksum validation; server copy to immutable
   `rooms/{roomId}/media/{messageId}/...` before canonical message creation.
+- `removeMessage`: authenticated active-member tombstone writer.
 
 Client code cannot write `rooms/{roomId}/messages/{messageId}` directly.
 Functions are the canonical message writer.
@@ -62,8 +63,13 @@ commands own their temporary emulator lifecycle. Emulator UI: `http://127.0.0.1:
 
 Rules tests and integration tests connect only to local emulators. Seed fixtures
 contain users, room, member, text, image metadata, and video metadata; fixture
-reset is limited to the emulator room. Orphan upload cleanup remains a future
-TTL job and is documented in `docs/contracts/message-delta-v1.md`.
+reset is limited to the emulator room. Integration wrappers automatically start
+required emulators; direct `vitest` integration runs require emulator hosts.
+
+Sync ownership is explicit: Flutter owns bounded live listener,
+`DocumentChange` mapping, MessageStore merge, and cursor UI; backend owns
+canonical writes, tombstones, schema, Rules, indexes, fixtures, and cleanup
+helpers. No full-snapshot endpoint exists.
 
 No Redis, CDN, transcoding, FCM, Flutter Firebase SDK, or production Firebase
 connection is part of this scaffold. Deployment remains unavailable until a
@@ -73,12 +79,20 @@ Membership authorization requires a member document with `active: true` in
 both Rules and Functions. Setting `active: false` is the sole revocation
 semantic; member deletion is not mixed into authorization logic.
 
-App Check is enforced by default. Only local emulator host variables activate
-the explicit local-only bypass. After a Firebase project exists, register each
-app with App Check, configure provider credentials, and deploy Functions with
-enforcement enabled; never copy emulator bypass variables into staging or
-production. Staging uploads have no automatic TTL cleanup job yet; orphan
-cleanup remains a documented blocker.
+App Check is enforced by default. Local bypass requires all of:
+`APP_ENV=emulator`, `APP_CHECK_MODE=bypass`, `GCLOUD_PROJECT=demo-*`, and
+loopback Auth/Firestore/Storage emulator hosts. Staging/production never bypass.
+The repository emulator wrapper sets these local-only variables automatically;
+do not copy them into staging or production.
+After a Firebase project exists, register each app with App Check and configure
+provider credentials; never copy emulator bypass variables into staging or
+production.
+
+Request recovery states are `reserved → processing → committed|failed`, with
+`expired` used by `recoverExpiredClientRequests`. Leases include
+`createdAt/updatedAt/leaseUntil`; active processing returns retryable
+`failed-precondition`. `cleanupOrphanFinalizedMedia` protects committed and
+active request media. Scheduler production wiring remains pending.
 
 ## Required reading
 

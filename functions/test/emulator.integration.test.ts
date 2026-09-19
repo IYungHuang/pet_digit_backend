@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { getFirestore } from 'firebase-admin/firestore';
 import { createMessageHandler, type AuthenticatedRequest } from '../src/index';
+import { cleanupOrphanFinalizedMedia, recoverExpiredClientRequests } from '../src/index';
 import { emulatorFixture, seedEmulatorFixture } from '../src/fixtures';
 
 describe('Functions emulator integration', () => {
@@ -84,5 +86,51 @@ describe('Functions emulator integration', () => {
     });
     expect(result.roomId).toBe('room-other');
     expect(result.messageId).not.toBe('');
+  });
+
+  it('recovers expired reservation and rejects active processing lease', async () => {
+    const roomId = 'room-integration';
+    const clientId = 'expired-recovery';
+    const requestId = createHash('sha256').update(`${roomId}\0${clientId}`).digest('hex');
+    await getFirestore().doc(`rooms/${roomId}/clientRequests/${requestId}`).set({
+      uid: 'user-integration', roomId, clientId, messageId: 'recovered-message', state: 'reserved',
+      createdAt: new Date('2026-09-18T00:00:00.000Z'), updatedAt: new Date('2026-09-18T00:00:00.000Z'), leaseUntil: new Date('2026-09-18T00:01:00.000Z'),
+    });
+    const recovered = await createMessageHandler({ auth: { uid: 'user-integration' }, data: { roomId, clientId, kind: 'text', text: 'recovered' } });
+    expect(recovered.messageId).toBe('recovered-message');
+
+    const activeClientId = 'active-processing';
+    const activeId = createHash('sha256').update(`${roomId}\0${activeClientId}`).digest('hex');
+    await getFirestore().doc(`rooms/${roomId}/clientRequests/${activeId}`).set({
+      uid: 'user-integration', roomId, clientId: activeClientId, messageId: 'active-message', state: 'processing',
+      createdAt: new Date(), updatedAt: new Date(), leaseUntil: new Date(Date.now() + 60_000),
+    });
+    await expect(createMessageHandler({ auth: { uid: 'user-integration' }, data: { roomId, clientId: activeClientId, kind: 'text', text: 'blocked' } }))
+      .rejects.toMatchObject({ code: 'failed-precondition' });
+
+    const failedClientId = 'failed-retry';
+    const failedId = createHash('sha256').update(`${roomId}\0${failedClientId}`).digest('hex');
+    await getFirestore().doc(`rooms/${roomId}/clientRequests/${failedId}`).set({
+      uid: 'user-integration', roomId, clientId: failedClientId, messageId: 'failed-retry-message', state: 'failed',
+      createdAt: new Date(), updatedAt: new Date(), leaseUntil: null,
+    });
+    const retried = await createMessageHandler({ auth: { uid: 'user-integration' }, data: { roomId, clientId: failedClientId, kind: 'text', text: 'retry failed request' } });
+    expect(retried.messageId).toBe('failed-retry-message');
+  });
+
+  it('expires stale requests and removes only unreferenced finalized media', async () => {
+    const requestRef = getFirestore().doc('rooms/room-integration/clientRequests/cleanup-request');
+    await requestRef.set({ uid: 'user-integration', roomId: 'room-integration', clientId: 'cleanup-client', messageId: 'cleanup-message', state: 'reserved', leaseUntil: new Date('2026-09-18T00:00:00.000Z') });
+    const recovered = await recoverExpiredClientRequests(new Date('2026-09-19T00:00:00.000Z'));
+    expect(recovered).toContain(requestRef.path);
+    expect((await requestRef.get()).data()?.state).toBe('expired');
+
+    const storage = (await import('firebase-admin/storage')).getStorage().bucket();
+    await storage.file('rooms/room-integration/media/orphan-cleanup/original').save(Buffer.from('orphan'), { metadata: { contentType: 'image/png' } });
+    await storage.file('rooms/room-integration/media/fixture-text/original').save(Buffer.from('protected'), { metadata: { contentType: 'image/png' } });
+    const removed = await cleanupOrphanFinalizedMedia();
+    expect(removed).toContain('rooms/room-integration/media/orphan-cleanup/original');
+    await expect(storage.file('rooms/room-integration/media/orphan-cleanup/original').exists()).resolves.toEqual([false]);
+    await expect(storage.file('rooms/room-integration/media/fixture-text/original').exists()).resolves.toEqual([true]);
   });
 });

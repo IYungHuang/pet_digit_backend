@@ -28,6 +28,14 @@ clientId`) document ID and stores/verifies full `uid + roomId + clientId`
 identity. Same-room cross-user reuse is rejected without returning another
 user's message; different rooms never read or reuse another room's request.
 
+## 2.1 Ownership boundary
+
+Flutter Firebase adapter owns bounded live Firestore listener,
+`DocumentChange` to `MessageDelta` mapping, client `MessageStore` merge, and
+cursor pagination UI merge. Backend owns canonical writes, tombstone writes,
+schema validation, Rules, indexes, and emulator fixtures. Backend does not
+duplicate the Flutter listener or expose a full-snapshot sync endpoint.
+
 ## 3. Supported content
 
 ```text
@@ -111,6 +119,10 @@ stable document tie-breaker.
 
 Pagination results merge into the client store. They must not replace the full
 room projection or reset scroll position.
+
+Backend query contract: `rooms/{roomId}/messages`, `createdAt ASC`, document ID
+`ASC` tie-breaker, default limit 50, maximum limit 100. Cursor is opaque and
+encodes `createdAt` plus `messageId`.
 
 ## 7. Optional reliability extension
 

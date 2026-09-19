@@ -263,6 +263,15 @@ events 成為硬需求時，才另評估 Cloud Run gateway。
 
 App Check 與 Auth、Rules 並用，不互相取代。
 
+### Sync ownership
+
+Flutter Firebase adapter owns bounded Firestore listener, `DocumentChange` to
+`MessageDelta`, client MessageStore merge, and cursor pagination UI merge.
+Backend owns canonical writes, tombstone writes, schema, Rules, indexes, and
+emulator fixtures. Backend does not implement a duplicate live listener or
+full-snapshot history endpoint. Message queries use `createdAt ASC` plus
+document ID `ASC` tie-breaker, bounded to 50 by default and 100 maximum.
+
 ## 8. Ops / observability
 
 ### Environment
@@ -285,7 +294,9 @@ Correlation fields：`requestId`、`uid`、`roomId`、`clientId`、`messageId`�
 ### Cost / reliability controls
 
 - listener limit + cursor pagination。
-- Storage staging TTL、orphan cleanup、thumbnail separate path。
+- Storage staging TTL、orphan cleanup、thumbnail separate path。Local recovery
+  and orphan-selection helpers exist; Scheduler production wiring remains
+  pending deployment checklist。
 - per-user/room/IP rate limit。
 - Function max instances、budget alerts。
 - Firestore scheduled backup；production 評估 PITR 與 restore drill。
