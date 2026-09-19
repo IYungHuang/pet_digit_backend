@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function validMime() {
+      return request.resource.contentType in [
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+        'video/mp4', 'video/quicktime'
+      ];
+    }
+    function validSize() { return request.resource.size <= 52428800; }
+    match /rooms/{roomId}/media/{uid}/{clientId}/original {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && request.auth.uid == uid &&
+        roomId.size() > 0 && clientId.size() > 0 && validMime() && validSize();
+      allow delete: if false;
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

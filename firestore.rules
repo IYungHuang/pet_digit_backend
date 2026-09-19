@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(roomId) {
+      return signedIn() && exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
+    }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    match /rooms/{roomId} {
+      allow read: if isMember(roomId);
+      allow write: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(roomId);
+        allow write: if false;
+      }
+      match /messages/{messageId} {
+        allow read: if isMember(roomId);
+        allow write: if false;
+      }
+      match /clientRequests/{clientId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+      match /devices/{deviceId} { allow read, write: if isOwner(uid); }
+      match /roomSummaries/{roomId} { allow read, write: if isOwner(uid); }
+    }
+  }
+}
