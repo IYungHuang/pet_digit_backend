@@ -2,6 +2,9 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
+    function activeMember(roomId) {
+      return signedIn() && firestore.get(/databases/(default)/documents/rooms/$(roomId)/members/$(request.auth.uid)).data.active == true;
+    }
     function validMime() {
       return request.resource != null && request.resource.contentType in [
         'image/jpeg', 'image/png', 'image/gif', 'image/webp',
@@ -9,11 +12,16 @@ service firebase.storage {
       ];
     }
     function validSize() { return request.resource != null && request.resource.size <= 52428800; }
-    match /rooms/{roomId}/media/{uid}/{clientId}/original {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow write: if signedIn() && request.auth.uid == uid &&
-        roomId.size() > 0 && clientId.size() > 0 && validMime() && validSize();
-      allow delete: if false;
+
+    match /rooms/{roomId}/staging/{uid}/{clientId}/original {
+      allow read: if signedIn() && request.auth.uid == uid && activeMember(roomId);
+      allow create: if signedIn() && request.auth.uid == uid && activeMember(roomId) &&
+        roomId.size() > 0 && clientId.size() > 0 && validMime() && validSize() && resource == null;
+      allow update, delete: if false;
+    }
+    match /rooms/{roomId}/media/{messageId}/{variant} {
+      allow read: if signedIn() && activeMember(roomId);
+      allow write, delete: if false;
     }
     match /{allPaths=**} { allow read, write: if false; }
   }

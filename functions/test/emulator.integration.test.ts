@@ -43,4 +43,46 @@ describe('Functions emulator integration', () => {
     expect(snapshot.size).toBe(3);
     expect(fixture.messages.filter(message => message.media).length).toBe(2);
   });
+
+  it('rejects inactive members and cross-user idempotency replay', async () => {
+    await getFirestore().doc('rooms/room-integration/members/user-integration').set({ active: false });
+    await expect(createMessageHandler({
+      auth: { uid: 'user-integration' },
+      data: { roomId: 'room-integration', clientId: 'inactive-client', kind: 'text', text: 'blocked' },
+    })).rejects.toMatchObject({ code: 'permission-denied' });
+
+    await getFirestore().doc('rooms/room-integration/members/user-integration').set({ active: true });
+    const first = await createMessageHandler({
+      auth: { uid: 'user-integration' },
+      data: { roomId: 'room-integration', clientId: 'tenant-client', kind: 'text', text: 'owner' },
+    });
+    await getFirestore().doc('rooms/room-integration/members/user-second').set({ active: true });
+    await expect(createMessageHandler({
+      auth: { uid: 'user-second' },
+      data: { roomId: 'room-integration', clientId: 'tenant-client', kind: 'text', text: 'replay' },
+    })).rejects.toMatchObject({ code: 'permission-denied' });
+    expect(first.senderId).toBe('user-integration');
+  });
+
+  it('does not create a second canonical message when requests race', async () => {
+    const request: AuthenticatedRequest = {
+      auth: { uid: 'user-integration' },
+      data: { roomId: 'room-integration', clientId: 'race-client', kind: 'text', text: 'one canonical message' },
+    };
+    const results = await Promise.all([createMessageHandler(request), createMessageHandler(request)]);
+    expect(new Set(results.map(result => result.messageId)).size).toBe(1);
+    const snapshot = await getFirestore().collection('rooms/room-integration/messages').get();
+    expect(snapshot.docs.filter(document => document.data().clientId === 'race-client')).toHaveLength(1);
+  });
+
+  it('does not reuse same clientId across rooms', async () => {
+    await getFirestore().doc('rooms/room-other').set({ roomId: 'room-other' });
+    await getFirestore().doc('rooms/room-other/members/user-integration').set({ active: true });
+    const result = await createMessageHandler({
+      auth: { uid: 'user-integration' },
+      data: { roomId: 'room-other', clientId: 'tenant-client', kind: 'text', text: 'other room' },
+    });
+    expect(result.roomId).toBe('room-other');
+    expect(result.messageId).not.toBe('');
+  });
 });

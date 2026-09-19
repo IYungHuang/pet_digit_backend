@@ -38,7 +38,8 @@ secrets, project IDs, or service-account JSON to this repository.
 - `createMessage`: Auth, room membership, text contract, and
   `uid/roomId/clientId` idempotency.
 - `finalizeMediaMessage`: Auth, membership, staging path, MIME, size, and
-  Storage metadata validation before canonical message creation.
+  Storage metadata/checksum validation; server copy to immutable
+  `rooms/{roomId}/media/{messageId}/...` before canonical message creation.
 
 Client code cannot write `rooms/{roomId}/messages/{messageId}` directly.
 Functions are the canonical message writer.
@@ -67,6 +68,17 @@ TTL job and is documented in `docs/contracts/message-delta-v1.md`.
 No Redis, CDN, transcoding, FCM, Flutter Firebase SDK, or production Firebase
 connection is part of this scaffold. Deployment remains unavailable until a
 real Firebase project ID, credentials, and separate deployment review exist.
+
+Membership authorization requires a member document with `active: true` in
+both Rules and Functions. Setting `active: false` is the sole revocation
+semantic; member deletion is not mixed into authorization logic.
+
+App Check is enforced by default. Only local emulator host variables activate
+the explicit local-only bypass. After a Firebase project exists, register each
+app with App Check, configure provider credentials, and deploy Functions with
+enforcement enabled; never copy emulator bypass variables into staging or
+production. Staging uploads have no automatic TTL cleanup job yet; orphan
+cleanup remains a documented blocker.
 
 ## Required reading
 

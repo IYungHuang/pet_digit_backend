@@ -16,8 +16,8 @@ export function emulatorFixture(): EmulatorFixture {
     members: [{ uid: 'user-integration' }],
     messages: [
       { messageId: 'fixture-text', clientId: 'fixture-text-client', kind: 'text', roomId: 'room-integration', senderId: 'user-integration', state: 'normal', schemaVersion: 1 },
-      { messageId: 'fixture-image', clientId: 'fixture-image-client', kind: 'image', roomId: 'room-integration', senderId: 'user-integration', state: 'normal', schemaVersion: 1, media: { storagePath: 'rooms/room-integration/media/user-integration/fixture-image-client/original', mimeType: 'image/png', sizeBytes: 100 } },
-      { messageId: 'fixture-video', clientId: 'fixture-video-client', kind: 'video', roomId: 'room-integration', senderId: 'user-integration', state: 'normal', schemaVersion: 1, media: { storagePath: 'rooms/room-integration/media/user-integration/fixture-video-client/original', mimeType: 'video/mp4', sizeBytes: 100 } },
+      { messageId: 'fixture-image', clientId: 'fixture-image-client', kind: 'image', roomId: 'room-integration', senderId: 'user-integration', state: 'normal', schemaVersion: 1, media: { storagePath: 'rooms/room-integration/media/fixture-image/original', mimeType: 'image/png', sizeBytes: 100, fileName: 'fixture.png', checksum: 'fixture-image-checksum' } },
+      { messageId: 'fixture-video', clientId: 'fixture-video-client', kind: 'video', roomId: 'room-integration', senderId: 'user-integration', state: 'normal', schemaVersion: 1, media: { storagePath: 'rooms/room-integration/media/fixture-video/original', mimeType: 'video/mp4', sizeBytes: 100, fileName: 'fixture.mp4', durationMs: 1000, checksum: 'fixture-video-checksum' } },
     ],
   };
 }

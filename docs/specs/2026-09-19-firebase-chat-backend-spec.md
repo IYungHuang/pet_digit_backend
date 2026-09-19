@@ -48,13 +48,15 @@ users/{uid}
 rooms/{roomId}
 rooms/{roomId}/members/{uid}
 rooms/{roomId}/messages/{messageId}
-rooms/{roomId}/clientRequests/{clientId}
+rooms/{roomId}/clientRequests/{requestHash}
 users/{uid}/devices/{deviceId}
 users/{uid}/roomSummaries/{roomId}
 ```
 
-`clientRequests/{clientId}` 以 document path 隔離 request；uid、roomId、
-request state 存在 document 欄位，不把含 `/` 的複合字串當 document ID。
+`clientRequests/{requestHash}` 使用 SHA-256(`roomId + NUL + clientId`)；document
+另儲存 uid、roomId、clientId、request state。server replay 必須比對完整
+`uid + roomId + clientId` identity。同 room 的 cross-user clientId collision
+拒絕且不洩漏 message；不同 room 不讀取或重用其他 request。
 
 ### Message document
 
@@ -78,8 +80,8 @@ Media 欄位：
 
 ```json
 {
-  "storagePath": "rooms/room_123/media/uid/client-id/original",
-  "thumbnailStoragePath": "rooms/room_123/media/uid/client-id/thumbnail",
+  "storagePath": "rooms/room_123/media/message-id/original",
+  "thumbnailStoragePath": "rooms/room_123/media/message-id/thumbnail",
   "mimeType": "video/mp4",
   "fileName": "clip.mp4",
   "sizeBytes": 123456,
@@ -110,9 +112,10 @@ client 產生 clientId
 ```text
 client 產生 clientId
 → optimistic pending message
-→ Storage upload 至 rooms/{roomId}/media/{uid}/{clientId}/original
+→ Storage upload 至 rooms/{roomId}/staging/{uid}/{clientId}/original
 → finalizeMediaMessage
-→ server 驗證 object path、owner、MIME、size、membership
+→ server 驗證 object path、owner、MIME、size、checksum、membership
+→ server copy 至 rooms/{roomId}/media/{messageId}/original，刪除 staging
 → transaction 建立 canonical message
 → listener 回傳 message
 ```

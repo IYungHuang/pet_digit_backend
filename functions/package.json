@@ -8,7 +8,7 @@
     "lint": "eslint src test vitest.config.ts --ext .ts,.cjs --report-unused-disable-directives",
     "typecheck": "tsc --noEmit",
     "emulator": "node scripts/emulator-run.mjs start",
-    "test": "vitest run test/contracts.test.ts test/message-contract.test.ts test/fixtures.test.ts",
+    "test": "vitest run test/contracts.test.ts test/message-contract.test.ts test/fixtures.test.ts test/app-check.test.ts",
     "test:rules": "node scripts/emulator-run.mjs rules",
     "test:rules:local": "node test/rules.test.cjs",
     "test:integration": "node scripts/emulator-run.mjs integration",

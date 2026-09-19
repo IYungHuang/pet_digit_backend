@@ -23,7 +23,10 @@ an entire room message list when reconnecting.
 
 `clientId` remains present after acknowledgement. Server deduplicates by
 `uid + roomId + clientId` and returns the original canonical message for a
-replayed request.
+replayed request. Request storage uses a deterministic SHA-256(`roomId + NUL +
+clientId`) document ID and stores/verifies full `uid + roomId + clientId`
+identity. Same-room cross-user reuse is rejected without returning another
+user's message; different rooms never read or reuse another room's request.
 
 ## 3. Supported content
 
@@ -74,9 +77,10 @@ message.modified
 message.removed
 ```
 
-`message.removed` carries `roomId`, `messageId`, `clientId`, and removal state;
-it does not require physical document deletion. Default policy is tombstone
-with `state=deleted`.
+`message.removed` carries `roomId`, `messageId`, `clientId`, and a canonical
+message with `state=deleted`; physical document deletion is not required.
+Firestore Timestamp values serialize as ISO-8601 strings. Unknown additive
+fields remain forward-compatible; unsupported `schemaVersion` is rejected.
 
 ## 5. Client merge rules
 

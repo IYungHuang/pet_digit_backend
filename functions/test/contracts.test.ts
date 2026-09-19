@@ -6,15 +6,21 @@ import {
   type AuthenticatedRequest,
 } from '../src/index';
 
-const requests = new Map<string, { messageId: string }>();
+const requests = new Map<string, { messageId: string; uid: string; roomId: string; clientId: string }>();
 const deps: Dependencies = {
   isMember: async () => true,
-  getRequest: async (_uid, _roomId, clientId) => requests.get(clientId) ?? null,
+  getRequest: async (uid, roomId, clientId) => {
+    const request = requests.get(clientId);
+    if (request && (request.uid !== uid || request.roomId !== roomId || request.clientId !== clientId)) {
+      return request;
+    }
+    return request ?? null;
+  },
   commitMessage: async ({ uid, roomId, clientId, kind }) => {
     const existing = requests.get(clientId);
-    if (existing) return { ...existing, clientId, roomId, senderId: uid, kind, state: 'normal' as const };
+    if (existing) return { messageId: existing.messageId, clientId, roomId, senderId: uid, kind, state: 'normal' as const };
     const result = { messageId: `message-${clientId}`, clientId, roomId, senderId: uid, kind, state: 'normal' as const };
-    requests.set(clientId, { messageId: result.messageId });
+    requests.set(clientId, { messageId: result.messageId, uid, roomId, clientId });
     return result;
   },
   getMediaMetadata: async () => ({ contentType: 'image/png', size: 100 }),
@@ -68,5 +74,31 @@ describe('message contracts', () => {
         updatedAt: 'forged-updated-at',
       },
     }, deps)).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
+
+  it('rejects image and video through createMessage', async () => {
+    for (const kind of ['image', 'video'] as const) {
+      await expect(createMessageHandler({
+        auth: { uid: 'user-1' },
+        data: { roomId: 'room-1', clientId: `client-${kind}`, kind, media: { storagePath: 'staging' } },
+      }, deps)).rejects.toMatchObject({ code: 'invalid-argument' });
+    }
+  });
+
+  it('rejects replay when another user reuses the same clientId', async () => {
+    const request = { roomId: 'room-tenant', clientId: 'shared-client', kind: 'text' as const, text: 'private' };
+    const first = await createMessageHandler({ auth: { uid: 'user-owner' }, data: request }, deps);
+    expect(first.senderId).toBe('user-owner');
+    await expect(createMessageHandler({ auth: { uid: 'user-other' }, data: request }, deps))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+  it('returns one message when duplicate requests race', async () => {
+    const request = { auth: { uid: 'user-race' }, data: { roomId: 'room-race', clientId: 'race-client', kind: 'text' as const, text: 'once' } };
+    const results = await Promise.all([
+      createMessageHandler(request, deps),
+      createMessageHandler(request, deps),
+    ]);
+    expect(new Set(results.map(result => result.messageId)).size).toBe(1);
   });
 });
