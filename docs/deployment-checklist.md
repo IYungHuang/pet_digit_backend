@@ -3,7 +3,17 @@
 Local emulator is the only supported environment until this checklist is
 reviewed with a real Firebase project.
 
-- Create separate staging/production Firebase projects and configure secrets
+Staging project:
+
+- Firebase project ID: `pet-digit-backend` (`staging` alias in `.firebaserc`).
+- Firestore `(default)`: Native, Standard, `asia-east1`.
+- Storage default bucket: `pet-digit-backend.firebasestorage.app`, regional
+  `asia-east1`.
+- All HTTP, callable, and scheduled Functions are pinned to `asia-east1`.
+- `functions/.env.pet-digit-backend` sets `APP_ENV=staging` and
+  `APP_CHECK_MODE=enforce`; it contains no secrets.
+
+- Keep staging/production Firebase projects separate and configure secrets
   outside this repository.
 - Deploy Firestore Rules/indexes, Storage Rules, and 2nd gen Functions through
   CI/CD. Never use local emulator bypass variables in staging/production.

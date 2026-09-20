@@ -7,6 +7,7 @@ import * as logger from 'firebase-functions/logger';
 import { normalizeCanonicalMessage, type MediaContract, type MessageKind } from './contracts';
 import { compensateCopiedObjects, cleanupOrphanFinalizedMedia as selectOrphanFinalizedMedia, recoverExpiredClientRequests as selectExpiredRequests, runWithConcurrency, type RequestState } from './cleanup';
 import { streamSha256 } from './media-stream';
+import { FIREBASE_REGION } from './deployment';
 
 try { getApp(); } catch { initializeApp(); }
 
@@ -369,8 +370,8 @@ export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Nu
   return orphans.map(item => item.path);
 }
 
-const callOptions = { enforceAppCheck: appCheckEnforcementFor() };
-export const healthCheck = onRequest((_request, response) => { response.status(200).json({ ok: true, emulator: Boolean(process.env.FIRESTORE_EMULATOR_HOST) }); });
+const callOptions = { region: FIREBASE_REGION, enforceAppCheck: appCheckEnforcementFor() };
+export const healthCheck = onRequest({ region: FIREBASE_REGION }, (_request, response) => { response.status(200).json({ ok: true, emulator: Boolean(process.env.FIRESTORE_EMULATOR_HOST) }); });
 export const createMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => createMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export const finalizeMediaMessage = onCall({ ...callOptions, memory: '512MiB', timeoutSeconds: 120, concurrency: 10 }, (request: CallableRequest<Record<string, unknown>>) => finalizeMediaMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export const removeMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => writeMessageTombstone({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));

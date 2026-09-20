@@ -91,6 +91,12 @@ After a Firebase project exists, register each app with App Check and configure
 provider credentials; never copy emulator bypass variables into staging or
 production.
 
+The staging alias targets Firebase project `pet-digit-backend`. Firestore,
+Storage, HTTP/callable Functions, and scheduled Functions are co-located in
+`asia-east1`. Non-secret staging environment values live in
+`functions/.env.pet-digit-backend`; deploy commands must use
+`--project=staging` explicitly.
+
 Request recovery states are `reserved → processing → committed|failed`, with
 `expired` used by `recoverExpiredClientRequests`. Leases include
 `createdAt/updatedAt/leaseUntil`; active processing returns retryable

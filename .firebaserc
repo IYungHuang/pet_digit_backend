@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "staging": "pet-digit-backend"
+  },
+  "targets": {},
+  "etags": {}
+}

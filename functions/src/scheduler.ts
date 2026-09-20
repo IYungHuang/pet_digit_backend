@@ -5,6 +5,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { selectExpiredStagingObjects, type StagingObject } from './cleanup';
 import { cleanupOrphanFinalizedMedia, recoverExpiredClientRequests, RECOVERY_BATCH_SIZE, FINALIZED_MEDIA_BATCH_SIZE } from './index';
+import { FIREBASE_REGION } from './deployment';
 
 const positiveMs = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
@@ -12,6 +13,7 @@ const positiveMs = (value: string | undefined, fallback: number): number => {
 };
 
 export type SchedulerConfig = {
+  region: typeof FIREBASE_REGION;
   recoverySchedule: string;
   stagingSchedule: string;
   finalizedSchedule: string;
@@ -22,6 +24,7 @@ export type SchedulerConfig = {
 
 export function schedulerConfigFor(environment: NodeJS.ProcessEnv = process.env): SchedulerConfig {
   return {
+    region: FIREBASE_REGION,
     recoverySchedule: environment.REQUEST_RECOVERY_SCHEDULE ?? 'every 5 minutes',
     stagingSchedule: environment.STAGING_CLEANUP_SCHEDULE ?? 'every 1 hours',
     finalizedSchedule: environment.FINALIZED_MEDIA_CLEANUP_SCHEDULE ?? 'every 1 hours',
@@ -79,7 +82,7 @@ function requireRequestId(roomId: string, clientId: string): string {
   return createHash('sha256').update(`${roomId}\0${clientId}`).digest('hex');
 }
 
-export const recoverExpiredClientRequestsScheduled = onSchedule({ schedule: config.recoverySchedule, ...retryConfig }, async () => {
+export const recoverExpiredClientRequestsScheduled = onSchedule({ region: config.region, schedule: config.recoverySchedule, ...retryConfig }, async () => {
   const stateRef = getFirestore().doc('maintenance/scheduler-recovery');
   const state = await stateRef.get();
   const cursor = typeof state.data()?.cursor === 'string' ? state.data()?.cursor as string : undefined;
@@ -88,12 +91,12 @@ export const recoverExpiredClientRequestsScheduled = onSchedule({ schedule: conf
   logger.info({ event: 'client_request_recovery_completed', count: result.paths.length, nextCursor: result.nextCursor, batchSize: RECOVERY_BATCH_SIZE, environment: process.env.APP_ENV ?? 'production' });
 });
 
-export const cleanupStagingObjectsScheduled = onSchedule({ schedule: config.stagingSchedule, ...retryConfig }, async () => {
+export const cleanupStagingObjectsScheduled = onSchedule({ region: config.region, schedule: config.stagingSchedule, ...retryConfig }, async () => {
   const result = await cleanupStagingObjects();
   logger.info({ event: 'staging_cleanup_completed', ...result, environment: process.env.APP_ENV ?? 'production' });
 });
 
-export const cleanupOrphanFinalizedMediaScheduled = onSchedule({ schedule: config.finalizedSchedule, ...retryConfig }, async () => {
+export const cleanupOrphanFinalizedMediaScheduled = onSchedule({ region: config.region, schedule: config.finalizedSchedule, ...retryConfig }, async () => {
   const paths = await cleanupOrphanFinalizedMedia();
   logger.info({ event: 'finalized_media_cleanup_completed', count: paths.length, batchSize: FINALIZED_MEDIA_BATCH_SIZE, environment: process.env.APP_ENV ?? 'production' });
 });
