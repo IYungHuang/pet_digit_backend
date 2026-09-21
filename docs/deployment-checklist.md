@@ -67,3 +67,18 @@ are invoked:
   For local emulator development, create `functions/.secret.local`
   containing `GEMINI_API_KEY=<your-key>`. This file is covered by
   `.gitignore` and must never be committed.
+
+- **Storage bucket CORS.** The frontend's zip export does a browser
+  `fetch()` on signed download URLs from the sprite generation Storage
+  bucket. GCS buckets have no CORS policy by default, so this fails
+  until one is applied. `cors.json` at the repo root lists the allowed
+  origins (currently local dev only — add the production domain when
+  the studio frontend gets deployed). Apply it with `gsutil` (available
+  in Cloud Shell at https://console.cloud.google.com/ without any local
+  install):
+
+  ```
+  gsutil cors set cors.json gs://pet-digit-backend.firebasestorage.app
+  ```
+
+  Verify with `gsutil cors get gs://pet-digit-backend.firebasestorage.app`.
