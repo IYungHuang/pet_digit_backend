@@ -5,3 +5,4 @@ functions/lib/
 .env
 .worktrees/
 functions/.secret.local
+functions/.env.local

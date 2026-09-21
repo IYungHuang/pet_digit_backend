@@ -31,6 +31,15 @@ const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
 try { getApp(); } catch { initializeApp(); }
 
+// STORAGE_BUCKET_OVERRIDE lets local emulator runs (under a "demo-" project
+// alias, so App Check bypass can apply) point at the real project's Storage
+// bucket instead of the admin SDK's auto-guessed default for a fake project.
+// Unset in every deployed environment, so real deploys are unaffected. Read
+// explicitly per call rather than via initializeApp options, since the
+// Functions Framework's own admin init (for App Check verification) can run
+// before this module's top-level code does.
+function defaultBucket() { return getStorage().bucket(process.env.STORAGE_BUCKET_OVERRIDE); }
+
 export type AuthenticatedRequest = { auth: { uid: string } | null; data: Record<string, unknown> };
 export type Media = {
   storagePath: string;
@@ -187,7 +196,7 @@ function firestoreDependencies(): Dependencies {
     isMember: async (uid, roomId) => (await db.doc(`rooms/${roomId}/members/${uid}`).get()).data()?.active === true,
     getRequest: readRequest,
     getMediaMetadata: async storagePath => {
-      const object = getStorage().bucket().file(storagePath);
+      const object = defaultBucket().file(storagePath);
       const [file] = await object.getMetadata();
       return {
         contentType: file.contentType,
@@ -243,10 +252,10 @@ function firestoreDependencies(): Dependencies {
         stagingPath = media.storagePath;
         const finalPath = `rooms/${roomId}/media/${messageRef.id}/original`;
         try {
-          await getStorage().bucket().file(media.storagePath).copy(getStorage().bucket().file(finalPath));
+          await defaultBucket().file(media.storagePath).copy(defaultBucket().file(finalPath));
           copiedPaths.push(finalPath);
         } catch (error) {
-          const compensation = await compensateCopiedObjects(copiedPaths, async path => { await getStorage().bucket().file(path).delete(); });
+          const compensation = await compensateCopiedObjects(copiedPaths, async path => { await defaultBucket().file(path).delete(); });
           await db.doc(requestRef.path).update({ state: 'failed', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null, cleanupPaths: compensation.failedPaths, cleanupRequired: compensation.failedPaths.length > 0 });
           throw error;
         }
@@ -261,12 +270,12 @@ function firestoreDependencies(): Dependencies {
           transaction.update(requestRef, { state: 'committed', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null, cleanupRequired: false });
         });
       } catch (error) {
-        const compensation = await compensateCopiedObjects(copiedPaths, async path => { await getStorage().bucket().file(path).delete(); });
+        const compensation = await compensateCopiedObjects(copiedPaths, async path => { await defaultBucket().file(path).delete(); });
         await requestRef.update({ state: 'failed', updatedAt: FieldValue.serverTimestamp(), leaseUntil: null, cleanupPaths: compensation.failedPaths, cleanupRequired: compensation.failedPaths.length > 0 });
         throw error;
       }
       if (stagingPath) {
-        try { await getStorage().bucket().file(stagingPath).delete(); }
+        try { await defaultBucket().file(stagingPath).delete(); }
         catch (error) { await requestRef.update({ cleanupRequired: true, cleanupPaths: [stagingPath] }); logger.error({ event: 'staging_delete_failed', path: stagingPath, error }); }
       }
       return canonicalResponse(await messageRef.get());
@@ -365,7 +374,7 @@ export async function recoverExpiredClientRequests(now = new Date(), cursor?: st
 
 export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Number(process.env.FINALIZED_MEDIA_GRACE_MS ?? 86_400_000)): Promise<string[]> {
   const db = getFirestore();
-  const bucket = getStorage().bucket();
+  const bucket = defaultBucket();
   const [files, nextQuery] = await bucket.getFiles({ prefix: 'rooms/', maxResults: FINALIZED_MEDIA_BATCH_SIZE });
   if (nextQuery?.pageToken) logger.info({ event: 'finalized_media_cleanup_continuation', pageToken: nextQuery.pageToken });
   const media = files.flatMap(file => {
@@ -391,7 +400,7 @@ export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Nu
 }
 
 async function readSourcePhotosFromStorage(uid: string, requestId: string): Promise<ReferencePhoto[]> {
-  const bucket = getStorage().bucket();
+  const bucket = defaultBucket();
   const prefix = `users/${uid}/pet-sprite-requests/${requestId}/source/`;
   const [files] = await bucket.getFiles({ prefix });
   const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
@@ -411,7 +420,7 @@ async function writeGeneratedFrameToStorage(
   buffer: Buffer,
 ): Promise<string> {
   const path = `users/${uid}/pet-sprite-requests/${requestId}/generated/${filename}`;
-  const file = getStorage().bucket().file(path);
+  const file = defaultBucket().file(path);
   await file.save(buffer, { metadata: { contentType: 'image/png' } });
   const [downloadUrl] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 24 * 60 * 60 * 1000 });
   return downloadUrl;
@@ -423,7 +432,7 @@ async function readGeneratedFrameFromStorage(
   filename: string,
 ): Promise<ReferencePhoto | null> {
   const path = `users/${uid}/pet-sprite-requests/${requestId}/generated/${filename}`;
-  const file = getStorage().bucket().file(path);
+  const file = defaultBucket().file(path);
   try {
     const [buffer] = await file.download();
     return { mimeType: 'image/png', base64Data: buffer.toString('base64') };
