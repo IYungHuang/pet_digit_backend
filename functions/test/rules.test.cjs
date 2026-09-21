@@ -20,9 +20,11 @@ async function main() {
       const db = context.firestore();
       await db.doc('rooms/room-1/members/user-1').set({ active: true });
       await db.doc('rooms/room-1/members/user-inactive').set({ active: false });
+      await db.doc('rooms/room-1/messages/message-1').set({ text: 'server message' });
+      await db.doc('searchTags/alpha').set({ uid: 'user-1' });
+      await db.doc('users/user-1').set({ nickname: 'Alice' });
+      await db.doc('users/user-1/pets/pet-1').set({ name: 'Bobby' });
     });
-
-    require(path.join(__dirname, '../node_modules/firebase/firebase-storage-compat.js'));
 
     const memberDb = env.authenticatedContext('user-1').firestore();
     const anonymousDb = env.unauthenticatedContext().firestore();
@@ -36,11 +38,29 @@ async function main() {
     await assert.rejects(
       memberDb.doc('rooms/room-1/messages/message-1').set({ text: 'client forged' }),
     );
-
-    await env.withSecurityRulesDisabled(async context => {
-      await context.firestore().doc('rooms/room-1/messages/message-1').set({ text: 'server message' });
-    });
     await memberDb.doc('rooms/room-1/messages/message-1').get();
+
+    // searchTags: signed-in can read, client write rejected, anonymous read rejected
+    await memberDb.doc('searchTags/alpha').get();
+    await assert.rejects(anonymousDb.doc('searchTags/alpha').get());
+    await assert.rejects(memberDb.doc('searchTags/alpha').set({ uid: 'user-1' }));
+
+    // users & pets: signed-in can read public profiles
+    await nonMemberDb.doc('users/user-1').get();
+    await nonMemberDb.doc('users/user-1/pets/pet-1').get();
+    await assert.rejects(anonymousDb.doc('users/user-1').get());
+    await assert.rejects(anonymousDb.doc('users/user-1/pets/pet-1').get());
+
+    // users & pets: only owner can write
+    await memberDb.doc('users/user-1').set({ nickname: 'Alice Updated' });
+    await memberDb.doc('users/user-1/pets/pet-1').set({ name: 'Bobby Updated' });
+    await assert.rejects(nonMemberDb.doc('users/user-1').set({ nickname: 'Hacked' }));
+    await assert.rejects(nonMemberDb.doc('users/user-1/pets/pet-1').set({ name: 'Hacked' }));
+
+    // roomSummaries: client write rejected (managed by Cloud Functions)
+    await assert.rejects(memberDb.doc('users/user-1/roomSummaries/room-1').set({ unreadCount: 0 }));
+
+    require(path.join(__dirname, '../node_modules/firebase/firebase-storage-compat.js'));
 
     const storage = env.authenticatedContext('user-1').storage();
     const inactiveStorage = env.authenticatedContext('user-inactive').storage();
@@ -67,7 +87,7 @@ async function main() {
     await assert.rejects(storage.ref('rooms/room-1/staging/user-1/client-1/original').put(Buffer.from('overwrite'), { contentType: 'image/png' }));
     await assert.rejects(storage.ref('rooms/room-1/media/message-1/original').put(Buffer.from('x'), { contentType: 'image/png' }));
     await assert.rejects(storage.ref('rooms/room-1/media/message-1/original').delete());
-    console.log('Rules tests passed: auth, active membership, canonical writes, original-only Storage owner/MIME/size/delete checks');
+    console.log('Rules tests passed: auth, active membership, canonical writes, original-only Storage owner/MIME/size/delete checks, searchTags/users/pets/roomSummaries rules');
   } finally {
     await env.cleanup();
   }

@@ -8,6 +8,16 @@ import { normalizeCanonicalMessage, type MediaContract, type MessageKind } from 
 import { compensateCopiedObjects, cleanupOrphanFinalizedMedia as selectOrphanFinalizedMedia, recoverExpiredClientRequests as selectExpiredRequests, runWithConcurrency, type RequestState } from './cleanup';
 import { streamSha256 } from './media-stream';
 import { FIREBASE_REGION } from './deployment';
+import {
+  upsertUserProfileHandler,
+  searchUsersHandler,
+  registerPetHandler,
+  updatePetHandler,
+  setDefaultPetHandler,
+  createRoomHandler,
+  updateRoomPetsHandler,
+  leaveRoomHandler,
+} from './user-pet-room';
 
 try { getApp(); } catch { initializeApp(); }
 
@@ -376,3 +386,30 @@ export const createMessage = onCall(callOptions, (request: CallableRequest<Recor
 export const finalizeMediaMessage = onCall({ ...callOptions, memory: '512MiB', timeoutSeconds: 120, concurrency: 10 }, (request: CallableRequest<Record<string, unknown>>) => finalizeMediaMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export const removeMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => writeMessageTombstone({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
 export * from './scheduler';
+export * from './user-pet-room-contracts';
+export * from './user-pet-room';
+
+export const upsertUserProfile = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  upsertUserProfileHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const searchUsers = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  searchUsersHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const registerPet = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  registerPetHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const updatePet = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  updatePetHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const setDefaultPet = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  setDefaultPetHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const createRoom = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  createRoomHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const updateRoomPets = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  updateRoomPetsHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
+export const leaveRoom = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  leaveRoomHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
+);
