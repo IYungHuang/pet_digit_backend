@@ -3,6 +3,7 @@ import { getApp, initializeApp } from 'firebase-admin/app';
 import { FieldPath, FieldValue, getFirestore, Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { HttpsError, onCall, onRequest, type CallableRequest } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
 import * as logger from 'firebase-functions/logger';
 import { normalizeCanonicalMessage, type MediaContract, type MessageKind } from './contracts';
 import { compensateCopiedObjects, cleanupOrphanFinalizedMedia as selectOrphanFinalizedMedia, recoverExpiredClientRequests as selectExpiredRequests, runWithConcurrency, type RequestState } from './cleanup';
@@ -18,6 +19,15 @@ import {
   updateRoomPetsHandler,
   leaveRoomHandler,
 } from './user-pet-room';
+import {
+  generatePetSpritesHandler,
+  regeneratePetSpriteFrameHandler,
+  type SpriteGenerationDependencies,
+} from './pet-sprite-generation';
+import type { ReferencePhoto } from './pet-sprite-gemini-client';
+import { generateFrameImageWithRetry } from './pet-sprite-gemini-client';
+
+const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
 try { getApp(); } catch { initializeApp(); }
 
@@ -380,6 +390,50 @@ export async function cleanupOrphanFinalizedMedia(now = new Date(), graceMs = Nu
   return orphans.map(item => item.path);
 }
 
+async function readSourcePhotosFromStorage(uid: string, requestId: string): Promise<ReferencePhoto[]> {
+  const bucket = getStorage().bucket();
+  const prefix = `users/${uid}/pet-sprite-requests/${requestId}/source/`;
+  const [files] = await bucket.getFiles({ prefix });
+  const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
+  return Promise.all(
+    sorted.map(async (file) => {
+      const [buffer] = await file.download();
+      const [metadata] = await file.getMetadata();
+      return { mimeType: metadata.contentType ?? 'image/jpeg', base64Data: buffer.toString('base64') };
+    }),
+  );
+}
+
+async function writeGeneratedFrameToStorage(
+  uid: string,
+  requestId: string,
+  filename: string,
+  buffer: Buffer,
+): Promise<string> {
+  const path = `users/${uid}/pet-sprite-requests/${requestId}/generated/${filename}`;
+  const file = getStorage().bucket().file(path);
+  await file.save(buffer, { metadata: { contentType: 'image/png' } });
+  const [downloadUrl] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 24 * 60 * 60 * 1000 });
+  return downloadUrl;
+}
+
+function buildSpriteGenerationDependencies(): SpriteGenerationDependencies {
+  return {
+    apiKey: GEMINI_API_KEY.value(),
+    readSourcePhotos: readSourcePhotosFromStorage,
+    writeGeneratedFrame: writeGeneratedFrameToStorage,
+    generateImage: generateFrameImageWithRetry,
+  };
+}
+
+const spriteCallOptions = {
+  region: FIREBASE_REGION,
+  enforceAppCheck: appCheckEnforcementFor(),
+  timeoutSeconds: 540,
+  memory: '512MiB' as const,
+  secrets: [GEMINI_API_KEY],
+};
+
 const callOptions = { region: FIREBASE_REGION, enforceAppCheck: appCheckEnforcementFor() };
 export const healthCheck = onRequest({ region: FIREBASE_REGION }, (_request, response) => { response.status(200).json({ ok: true, emulator: Boolean(process.env.FIRESTORE_EMULATOR_HOST) }); });
 export const createMessage = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) => createMessageHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }));
@@ -413,3 +467,15 @@ export const updateRoomPets = onCall(callOptions, (request: CallableRequest<Reco
 export const leaveRoom = onCall(callOptions, (request: CallableRequest<Record<string, unknown>>) =>
   leaveRoomHandler({ auth: request.auth ? { uid: request.auth.uid } : null, data: request.data }),
 );
+
+export const generatePetSprites = onCall(spriteCallOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  generatePetSpritesHandler(
+    { auth: request.auth ? { uid: request.auth.uid } : null, data: request.data },
+    buildSpriteGenerationDependencies(),
+  ));
+
+export const regeneratePetSpriteFrame = onCall(spriteCallOptions, (request: CallableRequest<Record<string, unknown>>) =>
+  regeneratePetSpriteFrameHandler(
+    { auth: request.auth ? { uid: request.auth.uid } : null, data: request.data },
+    buildSpriteGenerationDependencies(),
+  ));

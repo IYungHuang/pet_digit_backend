@@ -4,3 +4,4 @@ functions/lib/
 .firebase/
 .env
 .worktrees/
+functions/.secret.local
