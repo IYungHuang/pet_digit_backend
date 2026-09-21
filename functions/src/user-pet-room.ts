@@ -18,6 +18,7 @@ import {
   validatePetName,
   validatePetPersonality,
   validatePetSpecies,
+  validatePhotoUrls,
   validateSearchTag,
 } from './user-pet-room-contracts';
 
@@ -205,6 +206,7 @@ export async function registerPetHandler(
   const species = validatePetSpecies(context.data.species);
   const breed = validatePetBreed(context.data.breed);
   const avatarUrl = validateAvatarUrl(context.data.avatarUrl);
+  const photoUrls = validatePhotoUrls(context.data.photoUrls);
   const gender = validatePetGender(context.data.gender);
   const personality = validatePetPersonality(context.data.personality);
   const birthday = typeof context.data.birthday === 'string' ? context.data.birthday : null;
@@ -235,6 +237,7 @@ export async function registerPetHandler(
       species,
       breed,
       avatarUrl,
+      photoUrls,
       gender,
       personality,
       birthday,
@@ -258,6 +261,7 @@ export async function registerPetHandler(
       species,
       breed,
       avatarUrl,
+      photoUrls,
       gender,
       personality,
       birthday,
@@ -288,6 +292,7 @@ export async function updatePetHandler(
   if (updates.species !== undefined) sanitizedUpdates.species = validatePetSpecies(updates.species);
   if (updates.breed !== undefined) sanitizedUpdates.breed = validatePetBreed(updates.breed);
   if (updates.avatarUrl !== undefined) sanitizedUpdates.avatarUrl = validateAvatarUrl(updates.avatarUrl);
+  if (updates.photoUrls !== undefined) sanitizedUpdates.photoUrls = validatePhotoUrls(updates.photoUrls);
   if (updates.gender !== undefined) sanitizedUpdates.gender = validatePetGender(updates.gender);
   if (updates.personality !== undefined) sanitizedUpdates.personality = validatePetPersonality(updates.personality);
   if (updates.birthday !== undefined) sanitizedUpdates.birthday = typeof updates.birthday === 'string' ? updates.birthday : null;

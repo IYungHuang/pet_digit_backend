@@ -19,8 +19,16 @@ service firebase.storage {
       allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
     }
 
-    // Pet avatar storage
+    // Pet avatar and photo/media gallery storage
     match /users/{uid}/pets/{petId}/avatar {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
+    }
+    match /users/{uid}/pets/{petId}/photos/{photoId} {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
+    }
+    match /users/{uid}/pets/{petId}/media/{mediaId} {
       allow read: if true;
       allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
     }

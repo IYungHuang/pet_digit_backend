@@ -35,6 +35,7 @@ export type PetProfile = {
   species: PetSpecies;
   breed: string;
   avatarUrl: string;
+  photoUrls?: string[];
   gender: PetGender;
   personality: string;
   birthday?: string | null;
@@ -109,6 +110,22 @@ export function validateAvatarUrl(avatarUrl: unknown): string {
     throw new HttpsError('invalid-argument', 'Avatar URL is required and cannot be empty');
   }
   return avatarUrl.trim();
+}
+
+export function validatePhotoUrls(photoUrls: unknown): string[] {
+  if (photoUrls === undefined || photoUrls === null) return [];
+  if (!Array.isArray(photoUrls)) {
+    throw new HttpsError('invalid-argument', 'photoUrls must be an array of string URLs');
+  }
+  if (photoUrls.length > 20) {
+    throw new HttpsError('invalid-argument', 'photoUrls cannot exceed 20 photos');
+  }
+  return photoUrls.map((item, idx) => {
+    if (typeof item !== 'string' || item.trim().length === 0) {
+      throw new HttpsError('invalid-argument', `photoUrls item at index ${idx} must be a non-empty string`);
+    }
+    return item.trim();
+  });
 }
 
 export function validateSearchTag(searchTag: unknown): { original: string; lower: string } {
