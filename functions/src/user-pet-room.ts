@@ -403,6 +403,9 @@ export async function createRoomHandler(
   }
 
   const allMemberUids = Array.from(new Set([callerUid, ...inviteeUids]));
+  if (type === 'group' && allMemberUids.length > 10) {
+    throw new HttpsError('invalid-argument', '群組成員上限為 10 人 (MVP)');
+  }
   const db = getFirestore();
   const roomRef = db.doc(`rooms/${roomId}`);
 
