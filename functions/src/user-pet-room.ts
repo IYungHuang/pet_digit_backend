@@ -227,6 +227,19 @@ export async function registerPetHandler(
     }
 
     const userData = userDoc.data()!;
+    const basePetSlots = (userData.basePetSlots as number | undefined) ?? 1;
+    const invitedBonusSlots = (userData.invitedBonusSlots as number | undefined) ?? 0;
+    const paidBonusSlots = (userData.paidBonusSlots as number | undefined) ?? 0;
+    const maxPetSlots = basePetSlots + invitedBonusSlots + paidBonusSlots;
+
+    const existingPets = await transaction.get(db.collection(`users/${uid}/pets`));
+    if (existingPets.size >= maxPetSlots) {
+      throw new HttpsError(
+        'resource-exhausted',
+        `Pet capacity reached (${existingPets.size}/${maxPetSlots}). Invite friends or upgrade slots to register more pets.`,
+      );
+    }
+
     const isFirstPet = !userData.defaultPetId || userData.defaultPetId === '';
     const shouldBeDefault = isFirstPet || setAsDefault;
 
@@ -639,3 +652,54 @@ export async function leaveRoomHandler(
 
   return { success: true };
 }
+
+/**
+ * 9. unlockBonusPetSlot
+ * Increases invitedBonusSlots or paidBonusSlots for user profile.
+ */
+export async function unlockBonusPetSlotHandler(
+  context: AuthenticatedContext,
+): Promise<{
+  basePetSlots: number;
+  invitedBonusSlots: number;
+  paidBonusSlots: number;
+  maxPetSlots: number;
+}> {
+  const uid = requireCallerUid(context);
+  const reason = context.data.reason === 'paid' ? 'paid' : 'invite';
+
+  const db = getFirestore();
+  const userRef = db.doc(`users/${uid}`);
+
+  return await db.runTransaction(async (transaction) => {
+    const userDoc = await transaction.get(userRef);
+    if (!userDoc.exists) {
+      throw new HttpsError('not-found', 'User profile not found');
+    }
+
+    const userData = userDoc.data()!;
+    const basePetSlots = (userData.basePetSlots as number | undefined) ?? 1;
+    let invitedBonusSlots = (userData.invitedBonusSlots as number | undefined) ?? 0;
+    let paidBonusSlots = (userData.paidBonusSlots as number | undefined) ?? 0;
+
+    if (reason === 'invite') {
+      invitedBonusSlots += 1;
+    } else {
+      paidBonusSlots += 1;
+    }
+
+    transaction.update(userRef, {
+      invitedBonusSlots,
+      paidBonusSlots,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return {
+      basePetSlots,
+      invitedBonusSlots,
+      paidBonusSlots,
+      maxPetSlots: basePetSlots + invitedBonusSlots + paidBonusSlots,
+    };
+  });
+}
+

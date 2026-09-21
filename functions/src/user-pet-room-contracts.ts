@@ -16,6 +16,9 @@ export type UserProfile = {
   searchTag: string;
   searchTagLower: string;
   defaultPetId: string;
+  basePetSlots?: number;
+  invitedBonusSlots?: number;
+  paidBonusSlots?: number;
   createdAt: string;
   updatedAt: string;
   [key: string]: unknown;
