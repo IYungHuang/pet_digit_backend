@@ -32,3 +32,38 @@ Staging project:
   period before enabling clients.
 - Verify Storage lifecycle/TTL policy agrees with staging cleanup. Do not delete
   finalized media without message-reference and grace-period checks.
+
+## AI pet sprite generation prerequisites
+
+`generatePetSprites` and `regeneratePetSpriteFrame` have two deploy-time
+prerequisites that are easy to miss because nothing fails until the functions
+are invoked:
+
+- **Signed URL IAM permission.** Both functions call `file.getSignedUrl(...)`
+  to hand back a download URL for each generated frame. Application Default
+  Credentials have no private key to sign with, so the Cloud Functions
+  runtime service account must be granted the **Service Account Token
+  Creator** role (`roles/iam.serviceAccountTokenCreator`) on itself. This is a
+  one-time per-project setup step; without it, every call fails on the first
+  frame with a `client_email`/`signBlob` permission error:
+
+  ```
+  gcloud projects add-iam-policy-binding <PROJECT_ID> \
+    --member="serviceAccount:<PROJECT_ID>@appspot.gserviceaccount.com" \
+    --role="roles/iam.serviceAccountTokenCreator"
+  ```
+
+- **`GEMINI_API_KEY` secret.** Both functions read a `GEMINI_API_KEY` secret
+  via `defineSecret('GEMINI_API_KEY')`. Set it once per environment before
+  deploying:
+
+  ```
+  firebase functions:secrets:set GEMINI_API_KEY
+  ```
+
+  Paste a real Gemini API key (obtainable from
+  https://aistudio.google.com/apikey) at the prompt.
+
+  For local emulator development, create `functions/.secret.local`
+  containing `GEMINI_API_KEY=<your-key>`. This file is covered by
+  `.gitignore` and must never be committed.

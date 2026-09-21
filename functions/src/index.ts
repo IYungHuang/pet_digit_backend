@@ -429,7 +429,7 @@ function buildSpriteGenerationDependencies(): SpriteGenerationDependencies {
 const spriteCallOptions = {
   region: FIREBASE_REGION,
   enforceAppCheck: appCheckEnforcementFor(),
-  timeoutSeconds: 540,
+  timeoutSeconds: 1800,
   memory: '512MiB' as const,
   secrets: [GEMINI_API_KEY],
 };
