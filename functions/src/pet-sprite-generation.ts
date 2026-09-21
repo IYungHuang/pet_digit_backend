@@ -21,13 +21,17 @@ export type SpriteGenerationDependencies = {
   readSourcePhotos: (uid: string, requestId: string) => Promise<ReferencePhoto[]>;
   writeGeneratedFrame: (uid: string, requestId: string, filename: string, buffer: Buffer) => Promise<string>;
   generateImage: typeof generateFrameImageWithRetry;
+  readGeneratedFrame: (uid: string, requestId: string, filename: string) => Promise<ReferencePhoto | null>;
+  claimRequestLock: (lockId: string) => Promise<boolean>;
+  releaseRequestLock: (lockId: string) => Promise<void>;
 };
 
 export type GeneratedFrameResult = {
   filename: string;
-  storagePath: string;
-  downloadUrl: string;
-  needsReview: boolean;
+  storagePath?: string;
+  downloadUrl?: string;
+  needsReview?: boolean;
+  error?: string;
 };
 
 type FrameGenerationOutcome = GeneratedFrameResult & { normalizedBuffer: Buffer };
@@ -38,6 +42,39 @@ function requireCallerUid(context: AuthenticatedContext): string {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
   return uid;
+}
+
+async function withRequestLock<T>(
+  deps: SpriteGenerationDependencies,
+  lockId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const claimed = await deps.claimRequestLock(lockId);
+  if (!claimed) {
+    throw new HttpsError('already-exists', 'A generation request is already in progress for this id');
+  }
+  try {
+    return await work();
+  } finally {
+    await deps.releaseRequestLock(lockId);
+  }
+}
+
+async function fetchActionStyleAnchor(
+  deps: SpriteGenerationDependencies,
+  uid: string,
+  requestId: string,
+  petType: PetType,
+  spec: FrameSpec,
+): Promise<ReferencePhoto | undefined> {
+  if (spec.index === 0) {
+    return undefined;
+  }
+  const frameZero = FRAME_MANIFEST[petType].find((f) => f.action === spec.action && f.index === 0);
+  if (!frameZero) {
+    return undefined;
+  }
+  return (await deps.readGeneratedFrame(uid, requestId, frameZero.filename)) ?? undefined;
 }
 
 async function requireThreeSourcePhotos(
@@ -89,25 +126,34 @@ export async function generatePetSpritesHandler(
   const petType = validatePetType(context.data.petType);
   const referencePhotos = await requireThreeSourcePhotos(deps, uid, requestId);
 
-  const frames: GeneratedFrameResult[] = [];
-  const firstFrameByAction = new Map<string, ReferencePhoto>();
-  for (const spec of FRAME_MANIFEST[petType]) {
-    const firstFrameReference = firstFrameByAction.get(spec.action);
-    const outcome = await generateOneFrame(deps, uid, requestId, petType, spec, referencePhotos, firstFrameReference);
-    frames.push({
-      filename: outcome.filename,
-      storagePath: outcome.storagePath,
-      downloadUrl: outcome.downloadUrl,
-      needsReview: outcome.needsReview,
-    });
-    if (spec.index === 0) {
-      firstFrameByAction.set(spec.action, {
-        mimeType: 'image/png',
-        base64Data: outcome.normalizedBuffer.toString('base64'),
-      });
+  return withRequestLock(deps, `${uid}_${requestId}`, async () => {
+    const frames: GeneratedFrameResult[] = [];
+    const firstFrameByAction = new Map<string, ReferencePhoto>();
+    for (const spec of FRAME_MANIFEST[petType]) {
+      const firstFrameReference = firstFrameByAction.get(spec.action);
+      try {
+        const outcome = await generateOneFrame(deps, uid, requestId, petType, spec, referencePhotos, firstFrameReference);
+        frames.push({
+          filename: outcome.filename,
+          storagePath: outcome.storagePath,
+          downloadUrl: outcome.downloadUrl,
+          needsReview: outcome.needsReview,
+        });
+        if (spec.index === 0) {
+          firstFrameByAction.set(spec.action, {
+            mimeType: 'image/png',
+            base64Data: outcome.normalizedBuffer.toString('base64'),
+          });
+        }
+      } catch (error) {
+        frames.push({
+          filename: spec.filename,
+          error: error instanceof Error ? error.message : 'Frame generation failed',
+        });
+      }
     }
-  }
-  return { frames };
+    return { frames };
+  });
 }
 
 export async function regeneratePetSpriteFrameHandler(
@@ -120,11 +166,14 @@ export async function regeneratePetSpriteFrameHandler(
   const spec = validateFrameSpec(petType, context.data.action, context.data.index);
   const referencePhotos = await requireThreeSourcePhotos(deps, uid, requestId);
 
-  const outcome = await generateOneFrame(deps, uid, requestId, petType, spec, referencePhotos, undefined);
-  return {
-    filename: outcome.filename,
-    storagePath: outcome.storagePath,
-    downloadUrl: outcome.downloadUrl,
-    needsReview: outcome.needsReview,
-  };
+  return withRequestLock(deps, `${uid}_${requestId}_${spec.action}_${spec.index}`, async () => {
+    const styleAnchor = await fetchActionStyleAnchor(deps, uid, requestId, petType, spec);
+    const outcome = await generateOneFrame(deps, uid, requestId, petType, spec, referencePhotos, styleAnchor);
+    return {
+      filename: outcome.filename,
+      storagePath: outcome.storagePath,
+      downloadUrl: outcome.downloadUrl,
+      needsReview: outcome.needsReview,
+    };
+  });
 }

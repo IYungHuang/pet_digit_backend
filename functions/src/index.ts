@@ -417,12 +417,53 @@ async function writeGeneratedFrameToStorage(
   return downloadUrl;
 }
 
+async function readGeneratedFrameFromStorage(
+  uid: string,
+  requestId: string,
+  filename: string,
+): Promise<ReferencePhoto | null> {
+  const path = `users/${uid}/pet-sprite-requests/${requestId}/generated/${filename}`;
+  const file = getStorage().bucket().file(path);
+  try {
+    const [buffer] = await file.download();
+    return { mimeType: 'image/png', base64Data: buffer.toString('base64') };
+  } catch {
+    return null;
+  }
+}
+
+const SPRITE_LOCK_STALE_AFTER_MS = 30 * 60 * 1000;
+
+async function claimSpriteRequestLock(lockId: string): Promise<boolean> {
+  const db = getFirestore();
+  const ref = db.collection('petSpriteRequestLocks').doc(lockId);
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (snapshot.exists) {
+      const claimedAt = snapshot.data()?.claimedAt as Timestamp | undefined;
+      const isStale = !claimedAt || Date.now() - claimedAt.toMillis() > SPRITE_LOCK_STALE_AFTER_MS;
+      if (!isStale) {
+        return false;
+      }
+    }
+    transaction.set(ref, { claimedAt: Timestamp.now() });
+    return true;
+  });
+}
+
+async function releaseSpriteRequestLock(lockId: string): Promise<void> {
+  await getFirestore().collection('petSpriteRequestLocks').doc(lockId).delete();
+}
+
 function buildSpriteGenerationDependencies(): SpriteGenerationDependencies {
   return {
     apiKey: GEMINI_API_KEY.value(),
     readSourcePhotos: readSourcePhotosFromStorage,
     writeGeneratedFrame: writeGeneratedFrameToStorage,
     generateImage: generateFrameImageWithRetry,
+    readGeneratedFrame: readGeneratedFrameFromStorage,
+    claimRequestLock: claimSpriteRequestLock,
+    releaseRequestLock: releaseSpriteRequestLock,
   };
 }
 
