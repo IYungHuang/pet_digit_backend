@@ -87,7 +87,21 @@ async function main() {
     await assert.rejects(storage.ref('rooms/room-1/staging/user-1/client-1/original').put(Buffer.from('overwrite'), { contentType: 'image/png' }));
     await assert.rejects(storage.ref('rooms/room-1/media/message-1/original').put(Buffer.from('x'), { contentType: 'image/png' }));
     await assert.rejects(storage.ref('rooms/room-1/media/message-1/original').delete());
-    console.log('Rules tests passed: auth, active membership, canonical writes, original-only Storage owner/MIME/size/delete checks, searchTags/users/pets/roomSummaries rules');
+
+    // pet-sprite-requests: owner-only source upload, no overwrite of generated frames
+    await storage.ref('users/user-1/pet-sprite-requests/req-1/source/0').put(Buffer.from('x'), { contentType: 'image/jpeg' });
+    await assert.rejects(
+      anonymousStorage.ref('users/user-1/pet-sprite-requests/req-1/source/1').put(Buffer.from('x'), { contentType: 'image/jpeg' }),
+    );
+    await assert.rejects(
+      storage.ref('users/other-user/pet-sprite-requests/req-1/source/0').put(Buffer.from('x'), { contentType: 'image/jpeg' }),
+    );
+    await assert.rejects(
+      storage.ref('users/user-1/pet-sprite-requests/req-1/generated/corgi_idle_0.png').put(Buffer.from('x'), { contentType: 'image/png' }),
+    );
+    await storage.ref('users/user-1/pet-sprite-requests/req-1/source/0').getDownloadURL();
+
+    console.log('Rules tests passed: auth, active membership, canonical writes, original-only Storage owner/MIME/size/delete checks, searchTags/users/pets/roomSummaries rules, pet-sprite-requests owner-only source/generated rules');
   } finally {
     await env.cleanup();
   }

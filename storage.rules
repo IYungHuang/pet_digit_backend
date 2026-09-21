@@ -32,6 +32,15 @@ service firebase.storage {
       allow read: if true;
       allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
     }
+    match /users/{uid}/pet-sprite-requests/{requestId}/source/{index} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid && validMime() && validSize();
+      allow update, delete: if false;
+    }
+    match /users/{uid}/pet-sprite-requests/{requestId}/generated/{filename} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
 
     match /rooms/{roomId}/staging/{uid}/{clientId}/original {
       allow read: if signedIn() && request.auth.uid == uid && activeMember(roomId);
