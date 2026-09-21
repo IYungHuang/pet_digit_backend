@@ -45,11 +45,16 @@ are invoked:
   runtime service account must be granted the **Service Account Token
   Creator** role (`roles/iam.serviceAccountTokenCreator`) on itself. This is a
   one-time per-project setup step; without it, every call fails on the first
-  frame with a `client_email`/`signBlob` permission error:
+  frame with a `signBlob` permission error.
+
+  Gen2 Cloud Functions run as the **default Compute Engine service account**
+  (`<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`), not the App
+  Engine default (`<PROJECT_ID>@appspot.gserviceaccount.com`) — grant the
+  role to the compute one:
 
   ```
   gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:<PROJECT_ID>@appspot.gserviceaccount.com" \
+    --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
     --role="roles/iam.serviceAccountTokenCreator"
   ```
 
