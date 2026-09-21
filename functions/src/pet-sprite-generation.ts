@@ -7,7 +7,7 @@ import {
   type FrameSpec,
   type PetType,
 } from './pet-sprite-contracts';
-import { getPoseHint } from './pet-sprite-prompts';
+import { buildFramePrompt } from './pet-sprite-prompts';
 import { generateFrameImageWithRetry, type ReferencePhoto } from './pet-sprite-gemini-client';
 import { hasTransparentBackground, normalizeFrame } from './pet-sprite-postprocess';
 
@@ -61,7 +61,7 @@ async function generateOneFrame(
   referencePhotos: ReferencePhoto[],
   firstFrameReference: ReferencePhoto | undefined,
 ): Promise<FrameGenerationOutcome> {
-  const promptText = getPoseHint(petType, spec.action, spec.index);
+  const promptText = buildFramePrompt(petType, spec.action, spec.index);
   const rawBuffer = await deps.generateImage({
     apiKey: deps.apiKey,
     promptText,
