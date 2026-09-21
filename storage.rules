@@ -13,6 +13,18 @@ service firebase.storage {
     }
     function validSize() { return request.resource != null && request.resource.size <= 52428800; }
 
+    // User avatar storage
+    match /users/{uid}/avatar {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
+    }
+
+    // Pet avatar storage
+    match /users/{uid}/pets/{petId}/avatar {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid && validMime() && validSize();
+    }
+
     match /rooms/{roomId}/staging/{uid}/{clientId}/original {
       allow read: if signedIn() && request.auth.uid == uid && activeMember(roomId);
       allow create: if signedIn() && request.auth.uid == uid && activeMember(roomId) &&
